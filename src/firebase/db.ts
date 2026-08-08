@@ -8,6 +8,7 @@ import {
   updateDoc,
   collection,
   query,
+  where,
   orderBy,
   limit,
   Timestamp,
@@ -116,6 +117,31 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
     query(collection(db, 'games'), orderBy('createdAt', 'desc'), limit(count))
   )
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as Game))
+}
+
+/** Returns the active game created by the current user, if any */
+export async function getActiveGameForUser(uid: string): Promise<Game | null> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'games'),
+      where('createdBy', '==', uid),
+      where('status', '==', 'active'),
+      orderBy('createdAt', 'desc'),
+      limit(1),
+    )
+  )
+  if (snap.empty) return null
+  const d = snap.docs[0]
+  return { id: d.id, ...d.data() } as Game
+}
+
+/** Abandons a game without a winner */
+export async function abandonGame(gameId: string): Promise<void> {
+  await updateDoc(doc(db, 'games', gameId), {
+    status: 'abandoned',
+    winner: null,
+    finishedAt: Date.now(),
+  })
 }
 
 export async function finishGameManually(gameId: string): Promise<void> {

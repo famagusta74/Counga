@@ -35,7 +35,7 @@ export interface Round {
 export interface Game {
   id: string
   targetScore: number
-  status: 'active' | 'finished'
+  status: 'active' | 'finished' | 'abandoned'
   players: Player[]
   totalScores: Record<string, number>  // uid -> cumulative points
   winner: string | null                // uid of winner
