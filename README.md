@@ -23,7 +23,9 @@ A mobile-first Progressive Web App (PWA) for tracking scores in the **Counga** c
 
 ### Prerequisites
 - Node.js 18+
-- A Firebase project (free tier works)
+
+> Firebase is already configured — it uses the existing `football-prediction-game-ca155` project.
+> Make sure `https://famagusta74.github.io` is in the **Authorized domains** in Firebase → Authentication → Settings.
 
 ### 1. Clone & Install
 
@@ -33,37 +35,19 @@ cd Counga
 npm install
 ```
 
-### 2. Configure Firebase
-
-1. Go to [Firebase Console](https://console.firebase.google.com/) and create a project
-2. Enable **Authentication** → Google provider
-3. Enable **Firestore Database**
-4. Copy your web app config and create `.env.local`:
-
-```env
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
-```
-
-### 3. Run Locally
+### 2. Run Locally
 
 ```bash
 npm run dev
 ```
 
-### 4. Deploy to GitHub Pages
+### 3. Deploy to GitHub Pages
 
 ```bash
 npm run deploy
 ```
 
 Then visit: `https://famagusta74.github.io/Counga/`
-
-> **Note:** Add `https://famagusta74.github.io` to the **Authorized domains** in Firebase Authentication settings.
 
 ## 📱 Install as Mobile App
 
