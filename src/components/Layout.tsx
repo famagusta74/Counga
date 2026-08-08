@@ -17,7 +17,10 @@ export default function Layout() {
       <header className="sticky top-0 z-50 bg-brand-950 text-white px-4 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2">
           <span className="text-2xl">🃏</span>
-          <span className="font-bold text-lg tracking-tight">Counga</span>
+          <div>
+            <span className="font-bold text-lg tracking-tight">Counga</span>
+            <span className="ml-1.5 text-xs text-brand-400 font-normal">v{__APP_VERSION__}</span>
+          </div>
         </div>
         {currentUser && (
           <div className="flex items-center gap-3">
