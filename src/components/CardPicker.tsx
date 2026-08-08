@@ -170,6 +170,23 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setCameraOpen(false)
   }, [stream])
 
+  // Resize + compress to max 1024px wide, 60% JPEG quality
+  // iOS camera images can be 4–8 MB which causes Safari fetch to abort
+  const compressImage = (dataUrl: string): Promise<string> =>
+    new Promise(resolve => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 1024
+        const scale = img.width > MAX ? MAX / img.width : 1
+        const canvas = document.createElement('canvas')
+        canvas.width  = Math.round(img.width  * scale)
+        canvas.height = Math.round(img.height * scale)
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.6))
+      }
+      img.src = dataUrl
+    })
+
   const captureFromCamera = useCallback(() => {
     if (!videoRef.current) return
     const canvas = document.createElement('canvas')
@@ -203,7 +220,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setRawDetected('')
     setManualTotal(null)
     try {
-      const base64 = dataUrl.split(',')[1]
+      const compressed = await compressImage(dataUrl)
+      const base64 = compressed.split(',')[1]
       const { counts: detected, rawText, error } = await detectCardsFromImage(base64)
 
       setRawDetected(rawText)

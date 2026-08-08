@@ -144,6 +144,47 @@ export async function abandonGame(gameId: string): Promise<void> {
   })
 }
 
+/** Updates a single round's scores and recalculates game totals from scratch */
+export async function updateRound(
+  gameId: string,
+  roundId: string,
+  newScores: Record<string, number>,
+): Promise<void> {
+  // 1. Save the updated round scores
+  await updateDoc(doc(db, 'games', gameId, 'rounds', roundId), { scores: newScores })
+
+  // 2. Re-fetch ALL rounds and recompute totals from scratch
+  const allRounds = await getRounds(gameId)
+  const gameRef = doc(db, 'games', gameId)
+  const gameSnap = await getDoc(gameRef)
+  if (!gameSnap.exists()) return
+  const game = gameSnap.data() as Game
+
+  const newTotals: Record<string, number> = {}
+  game.players.forEach(p => { newTotals[p.uid] = 0 })
+
+  for (const round of allRounds) {
+    const scores = round.id === roundId ? newScores : round.scores
+    Object.entries(scores).forEach(([uid, pts]) => {
+      newTotals[uid] = (newTotals[uid] ?? 0) + pts
+    })
+  }
+
+  // 3. Re-evaluate game status
+  const hasReachedTarget = Object.values(newTotals).some(s => s >= game.targetScore)
+  let winner: string | null = game.winner
+  let status = game.status
+
+  if (hasReachedTarget && game.status === 'active') {
+    status = 'finished'
+    winner = Object.entries(newTotals).reduce<string>((best, [uid, pts]) => {
+      return pts < (newTotals[best] ?? Infinity) ? uid : best
+    }, Object.keys(newTotals)[0])
+  }
+
+  await updateDoc(gameRef, { totalScores: newTotals, status, winner })
+}
+
 export async function finishGameManually(gameId: string): Promise<void> {
   const gameRef = doc(db, 'games', gameId)
   const gameSnap = await getDoc(gameRef)

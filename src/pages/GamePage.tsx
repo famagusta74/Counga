@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGame, getRounds, addRound, finishGameManually } from '../firebase/db'
+import { getGame, getRounds, addRound, finishGameManually, updateRound } from '../firebase/db'
 import type { Game, Round } from '../types'
 import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
@@ -76,6 +76,12 @@ export default function GamePage() {
     }
   }
 
+  const handleEditRound = useCallback(async (round: Round, newScores: Record<string, number>) => {
+    if (!gameId) return
+    await updateRound(gameId, round.id, newScores)
+    await load()
+  }, [gameId, load])
+
   const handleFinish = async () => {
     if (!gameId) return
     await finishGameManually(gameId)
@@ -146,6 +152,7 @@ export default function GamePage() {
           targetScore={game.targetScore}
           status={game.status}
           winner={game.winner}
+          onEditRound={handleEditRound}
         />
       </div>
 
