@@ -144,7 +144,7 @@ export async function abandonGame(gameId: string): Promise<void> {
   })
 }
 
-/** Updates a single round's scores and adjusts game totals using delta (no index needed) */
+/** Updates a single round's scores then recomputes all totals from scratch */
 export async function updateRound(
   gameId: string,
   roundId: string,
@@ -153,34 +153,32 @@ export async function updateRound(
   const roundRef = doc(db, 'games', gameId, 'rounds', roundId)
   const gameRef  = doc(db, 'games', gameId)
 
-  // 1. Fetch the existing round to calculate the delta
-  const [roundSnap, gameSnap] = await Promise.all([
-    getDoc(roundRef),
+  // 1. Save the edited round first
+  await updateDoc(roundRef, { scores: newScores })
+
+  // 2. Fetch ALL round docs (no orderBy → no index required)
+  const [allRoundsSnap, gameSnap] = await Promise.all([
+    getDocs(collection(db, 'games', gameId, 'rounds')),
     getDoc(gameRef),
   ])
 
-  if (!roundSnap.exists() || !gameSnap.exists()) return
-
-  const oldScores = (roundSnap.data().scores ?? {}) as Record<string, number>
+  if (!gameSnap.exists()) return
   const game = gameSnap.data() as Game
 
-  // 2. Apply delta: newTotal[uid] = currentTotal[uid] - oldScore[uid] + newScore[uid]
-  const newTotals = { ...game.totalScores }
-  const allUids = new Set([
-    ...Object.keys(oldScores),
-    ...Object.keys(newScores),
-  ])
-  allUids.forEach(uid => {
-    const old = oldScores[uid] ?? 0
-    const next = newScores[uid] ?? 0
-    newTotals[uid] = (newTotals[uid] ?? 0) - old + next
+  // 3. Sum every round's scores from scratch
+  const newTotals: Record<string, number> = {}
+  game.players.forEach(p => { newTotals[p.uid] = 0 })
+
+  allRoundsSnap.docs.forEach(d => {
+    // Use the freshly saved scores for the edited round, stored scores for the rest
+    const scores = d.id === roundId ? newScores : (d.data().scores ?? {}) as Record<string, number>
+    Object.entries(scores).forEach(([uid, pts]) => {
+      newTotals[uid] = (newTotals[uid] ?? 0) + pts
+    })
   })
 
-  // 3. Save the round + recalculate totals in parallel
-  await Promise.all([
-    updateDoc(roundRef, { scores: newScores }),
-    updateDoc(gameRef, { totalScores: newTotals }),
-  ])
+  // 4. Persist the recomputed totals
+  await updateDoc(gameRef, { totalScores: newTotals })
 }
 
 export async function finishGameManually(gameId: string): Promise<void> {
