@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getRecentGames } from '../firebase/db'
 import type { Game } from '../types'
-import { PlusCircle, Trophy, Clock, ChevronRight } from 'lucide-react'
+import { PlusCircle, Trophy, ChevronRight } from 'lucide-react'
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {

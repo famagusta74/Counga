@@ -5,7 +5,7 @@ import type { Game, Round } from '../types'
 import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
-import { Trophy, Plus, ChevronDown, ChevronUp, Flag } from 'lucide-react'
+import { Trophy, Plus, Flag } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number
@@ -19,7 +19,6 @@ export default function GamePage() {
   const [game, setGame] = useState<Game | null>(null)
   const [rounds, setRounds] = useState<Round[]>([])
   const [loading, setLoading] = useState(true)
-  const [showPicker, setShowPicker] = useState(false)
   const [pickerState, setPickerState] = useState<PickerState | null>(null)
   const [addingRound, setAddingRound] = useState(false)
   const [submitting, setSubmitting] = useState(false)

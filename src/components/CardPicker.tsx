@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ALL_RANKS, CARD_POINTS, calculateHandScore } from '../utils/scoring'
 import type { CardRank } from '../types'
-import { Minus, Plus, Camera, Check } from 'lucide-react'
+import { Minus, Plus, Check } from 'lucide-react'
 
 interface CardPickerProps {
   playerName: string
