@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users can read/write their own profile
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Games: any authenticated user (including anonymous) can create games
+    // Anyone authenticated can read games
+    // Only the creator can write (update/delete)
+    match /games/{gameId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null &&
+                       (request.auth.uid == resource.data.createdBy ||
+                        resource.data.players.size() > 0);
+      allow delete: if request.auth != null && request.auth.uid == resource.data.createdBy;
+
+      // Rounds: any player in the game can add/read rounds
+      match /rounds/{roundId} {
+        allow read:   if request.auth != null;
+        allow create: if request.auth != null;
+      }
+    }
+  }
+}
