@@ -198,9 +198,10 @@ export default function GamePage() {
         </div>
       )}
 
-      {/* Card picker modal */}
+      {/* Card picker modal — key forces full remount per player so state never leaks */}
       {addingRound && pickerState && (
         <CardPicker
+          key={`${pickerState.playerIndex}-${game.players[pickerState.playerIndex].uid}`}
           playerName={game.players[pickerState.playerIndex].displayName}
           onConfirm={handleCardConfirm}
           onCancel={handlePickerCancel}
