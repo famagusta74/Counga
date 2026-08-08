@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { ALL_RANKS, CARD_POINTS, calculateHandScore } from '../utils/scoring'
 import type { CardRank } from '../types'
-import { Minus, Plus, Check, Camera, RefreshCw, Loader, AlertCircle } from 'lucide-react'
+import { Minus, Plus, Check, Camera, RefreshCw, Loader, AlertCircle, Edit3 } from 'lucide-react'
 
 interface CardPickerProps {
   playerName: string
@@ -13,15 +13,56 @@ type Tab = 'camera' | 'manual'
 
 // ── Google Cloud Vision card parser ─────────────────────────────────────────
 
-const VISION_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY // same project key
+const VISION_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY
 
-async function detectCardsFromImage(base64Image: string): Promise<Partial<Record<CardRank, number>>> {
+// Each Vision annotation is a single text fragment (e.g. "A", "K", "10", "JOKER")
+// We match each fragment individually to avoid false positives from concatenation
+function parseCardsFromAnnotations(annotations: { description: string }[]): Partial<Record<CardRank, number>> {
+  // Skip the first annotation — it's the full page text dump
+  const fragments = annotations.slice(1).map(a => a.description.trim().toUpperCase())
+
+  // Tally how many times each rank token appears
+  const tally: Partial<Record<CardRank, number>> = {}
+
+  const exactMap: Record<string, CardRank> = {
+    'A': 'A', 'ACE': 'A',
+    'K': 'K', 'KING': 'K',
+    'Q': 'Q', 'QUEEN': 'Q',
+    'J': 'J', 'JACK': 'J',
+    '10': '10',
+    '9': '9', '8': '8', '7': '7', '6': '6',
+    '5': '5', '4': '4', '3': '3', '2': '2',
+    'JOKER': 'Joker', 'JKR': 'Joker',
+  }
+
+  for (const fragment of fragments) {
+    const rank = exactMap[fragment]
+    if (rank) {
+      tally[rank] = (tally[rank] ?? 0) + 1
+    }
+  }
+
+  // Standard playing cards show the rank in TWO corners (top-left + bottom-right)
+  // When cards are spread out face-up, Vision often sees each corner separately.
+  // Divide by 2, minimum 1. If only 1 detection, still count as 1 card.
+  const counts: Partial<Record<CardRank, number>> = {}
+  for (const [rank, n] of Object.entries(tally) as [CardRank, number][]) {
+    counts[rank] = Math.max(1, Math.round(n / 2))
+  }
+
+  return counts
+}
+
+async function detectCardsFromImage(base64Image: string): Promise<{
+  counts: Partial<Record<CardRank, number>>
+  rawText: string
+  error?: string
+}> {
   const body = {
     requests: [{
       image: { content: base64Image },
       features: [
-        { type: 'TEXT_DETECTION', maxResults: 50 },
-        { type: 'OBJECT_LOCALIZATION', maxResults: 20 },
+        { type: 'TEXT_DETECTION', maxResults: 100 },
       ],
     }],
   }
@@ -31,48 +72,28 @@ async function detectCardsFromImage(base64Image: string): Promise<Partial<Record
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   )
 
-  if (!resp.ok) throw new Error(`Vision API error: ${resp.status}`)
   const data = await resp.json()
 
-  const textAnnotations: { description: string }[] =
-    data.responses?.[0]?.textAnnotations ?? []
-
-  // Build a single string of all detected text and scan for card ranks
-  const allText = textAnnotations.map(a => a.description).join(' ').toUpperCase()
-
-  const counts: Partial<Record<CardRank, number>> = {}
-
-  const rankPatterns: { rank: CardRank; patterns: RegExp[] }[] = [
-    { rank: 'Joker', patterns: [/JOKER/gi] },
-    { rank: 'A',     patterns: [/\bA\b/g, /\bACE\b/gi] },
-    { rank: 'K',     patterns: [/\bK\b/g, /\bKING\b/gi] },
-    { rank: 'Q',     patterns: [/\bQ\b/g, /\bQUEEN\b/gi] },
-    { rank: 'J',     patterns: [/\bJ\b/g, /\bJACK\b/gi] },
-    { rank: '10',    patterns: [/\b10\b/g] },
-    { rank: '9',     patterns: [/\b9\b/g] },
-    { rank: '8',     patterns: [/\b8\b/g] },
-    { rank: '7',     patterns: [/\b7\b/g] },
-    { rank: '6',     patterns: [/\b6\b/g] },
-    { rank: '5',     patterns: [/\b5\b/g] },
-    { rank: '4',     patterns: [/\b4\b/g] },
-    { rank: '3',     patterns: [/\b3\b/g] },
-    { rank: '2',     patterns: [/\b2\b/g] },
-  ]
-
-  for (const { rank, patterns } of rankPatterns) {
-    let total = 0
-    for (const pat of patterns) {
-      const matches = allText.match(pat)
-      if (matches) total += matches.length
-    }
-    // Each card rank appears twice on a standard card (top + bottom corner)
-    // Divide by 2 and round up to get card count
-    if (total > 0) {
-      counts[rank] = Math.max(1, Math.round(total / 2))
-    }
+  // Surface any API-level error
+  if (!resp.ok) {
+    const msg = data?.error?.message ?? `HTTP ${resp.status}`
+    return { counts: {}, rawText: '', error: msg }
   }
 
-  return counts
+  const response = data.responses?.[0]
+  if (response?.error) {
+    return { counts: {}, rawText: '', error: response.error.message }
+  }
+
+  const annotations: { description: string }[] = response?.textAnnotations ?? []
+  if (annotations.length === 0) {
+    return { counts: {}, rawText: '', error: 'No text found in image. Make sure cards are well-lit and clearly visible.' }
+  }
+
+  const rawText = annotations[0]?.description ?? ''
+  const counts = parseCardsFromAnnotations(annotations)
+
+  return { counts, rawText }
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -85,25 +106,44 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     return init
   })
 
+  // Manual total override
+  const [manualTotal, setManualTotal] = useState<number | null>(null)
+  const [editingTotal, setEditingTotal] = useState(false)
+  const [totalInput, setTotalInput] = useState('')
+
   // Camera state
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiDone, setAiDone] = useState(false)
+  const [rawDetected, setRawDetected] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [cameraOpen, setCameraOpen] = useState(false)
 
-  const total = calculateHandScore(ALL_RANKS.map(r => ({ rank: r, count: counts[r] })))
+  const computedTotal = calculateHandScore(ALL_RANKS.map(r => ({ rank: r, count: counts[r] })))
+  const displayTotal = manualTotal !== null ? manualTotal : computedTotal
 
   const adjust = (rank: CardRank, delta: number) => {
+    setManualTotal(null) // reset manual override when cards change
     setCounts(prev => ({ ...prev, [rank]: Math.max(0, prev[rank] + delta) }))
+  }
+
+  // Manual total edit
+  const startEditTotal = () => {
+    setTotalInput(String(displayTotal))
+    setEditingTotal(true)
+  }
+  const commitEditTotal = () => {
+    const v = parseInt(totalInput, 10)
+    if (!isNaN(v) && v >= 0) setManualTotal(v)
+    setEditingTotal(false)
   }
 
   const handleConfirm = () => {
     const cards = ALL_RANKS.filter(r => counts[r] > 0).map(r => ({ rank: r, count: counts[r] }))
-    onConfirm(total, cards)
+    onConfirm(displayTotal, cards)
   }
 
   // ── Camera helpers ────────────────────────────────────────────────────────
@@ -112,11 +152,10 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setAiError('')
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
       })
       setStream(s)
       setCameraOpen(true)
-      // attach to video element after state update
       setTimeout(() => {
         if (videoRef.current) videoRef.current.srcObject = s
       }, 100)
@@ -134,10 +173,10 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
   const captureFromCamera = useCallback(() => {
     if (!videoRef.current) return
     const canvas = document.createElement('canvas')
-    canvas.width  = videoRef.current.videoWidth
-    canvas.height = videoRef.current.videoHeight
+    canvas.width  = videoRef.current.videoWidth  || 1280
+    canvas.height = videoRef.current.videoHeight || 720
     canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
     setCapturedImage(dataUrl)
     closeCamera()
     analyzeImage(dataUrl)
@@ -153,34 +192,47 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
       analyzeImage(dataUrl)
     }
     reader.readAsDataURL(file)
+    // reset input so same file can be re-uploaded
+    e.target.value = ''
   }
 
   const analyzeImage = async (dataUrl: string) => {
     setAnalyzing(true)
     setAiError('')
     setAiDone(false)
+    setRawDetected('')
+    setManualTotal(null)
     try {
-      // Strip the data:image/...;base64, prefix
       const base64 = dataUrl.split(',')[1]
-      const detected = await detectCardsFromImage(base64)
+      const { counts: detected, rawText, error } = await detectCardsFromImage(base64)
+
+      setRawDetected(rawText)
+
+      if (error) {
+        setAiError(error)
+        setTab('manual')
+        return
+      }
 
       if (Object.keys(detected).length === 0) {
-        setAiError('No cards detected. Please adjust the counts manually.')
-      } else {
-        setCounts(prev => {
-          const next = { ...prev }
-          ALL_RANKS.forEach(r => { next[r] = 0 })
-          Object.entries(detected).forEach(([rank, count]) => {
-            next[rank as CardRank] = count ?? 0
-          })
-          return next
-        })
-        setAiDone(true)
-        setTab('manual') // switch to manual tab so user can review/adjust
+        setAiError('No cards detected. Try again with better lighting, or adjust manually.')
+        setTab('manual')
+        return
       }
+
+      setCounts(prev => {
+        const next = { ...prev }
+        ALL_RANKS.forEach(r => { next[r] = 0 })
+        Object.entries(detected).forEach(([rank, count]) => {
+          next[rank as CardRank] = count ?? 0
+        })
+        return next
+      })
+      setAiDone(true)
+      setTab('manual')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setAiError(`AI detection failed: ${msg}. Adjust cards manually.`)
+      setAiError(`Detection failed: ${msg}`)
       setTab('manual')
     } finally {
       setAnalyzing(false)
@@ -191,6 +243,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setCapturedImage(null)
     setAiDone(false)
     setAiError('')
+    setRawDetected('')
+    setManualTotal(null)
     setCounts(() => {
       const init = {} as Record<CardRank, number>
       ALL_RANKS.forEach(r => { init[r] = 0 })
@@ -210,9 +264,46 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
             <h3 className="font-bold text-base text-gray-900">Remaining cards</h3>
             <p className="text-sm text-gray-500 mt-0.5">{playerName}</p>
           </div>
+          {/* Total — tappable to edit manually */}
           <div className="text-right">
-            <div className="text-2xl font-bold text-brand-700">{total}</div>
-            <div className="text-xs text-gray-400">points</div>
+            {editingTotal ? (
+              <div className="flex items-center gap-1 justify-end">
+                <input
+                  type="number"
+                  value={totalInput}
+                  min={0}
+                  onChange={e => setTotalInput(e.target.value)}
+                  onBlur={commitEditTotal}
+                  onKeyDown={e => { if (e.key === 'Enter') commitEditTotal() }}
+                  className="w-20 text-right text-2xl font-bold text-brand-700 border-b-2 border-brand-500 outline-none bg-transparent"
+                  autoFocus
+                />
+                <button onClick={commitEditTotal} className="text-brand-600 p-1">
+                  <Check size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={startEditTotal}
+                className="flex items-center gap-1 group"
+                title="Tap to override total"
+              >
+                <div>
+                  <div className="text-2xl font-bold text-brand-700 leading-none">{displayTotal}</div>
+                  <div className="text-xs text-gray-400 flex items-center gap-1 justify-end mt-0.5">
+                    pts <Edit3 size={10} className="opacity-50 group-hover:opacity-100" />
+                  </div>
+                </div>
+              </button>
+            )}
+            {manualTotal !== null && (
+              <button
+                onClick={() => setManualTotal(null)}
+                className="text-xs text-brand-500 underline mt-0.5 block text-right"
+              >
+                reset to cards
+              </button>
+            )}
           </div>
         </div>
 
@@ -220,7 +311,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
         <div className="flex border-b border-gray-100">
           <button
             onClick={() => setTab('camera')}
-            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${
               tab === 'camera' ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500'
             }`}
           >
@@ -228,7 +319,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
           </button>
           <button
             onClick={() => setTab('manual')}
-            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+            className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-colors ${
               tab === 'manual' ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500'
             }`}
           >
@@ -242,31 +333,46 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
           {/* ── CAMERA TAB ── */}
           {tab === 'camera' && (
             <div className="p-5 space-y-4">
+
               {analyzing && (
                 <div className="flex flex-col items-center justify-center py-10 gap-3 text-brand-600">
                   <Loader size={36} className="animate-spin" />
                   <p className="text-sm font-medium">Analysing cards with AI…</p>
+                  <p className="text-xs text-gray-400">This takes a few seconds</p>
                 </div>
               )}
 
               {!analyzing && capturedImage && (
                 <div className="space-y-3">
-                  <img src={capturedImage} alt="Captured" className="w-full rounded-xl object-cover max-h-56" />
+                  <img src={capturedImage} alt="Captured" className="w-full rounded-xl object-cover max-h-52" />
                   {aiDone && (
                     <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-700 flex items-center gap-2">
                       <Check size={15} />
-                      Cards detected! Review &amp; adjust in the Manual tab.
+                      Cards detected! Switch to Manual tab to review &amp; adjust.
                     </div>
                   )}
                   {aiError && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600 flex items-center gap-2">
-                      <AlertCircle size={15} />
-                      {aiError}
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+                      <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p>{aiError}</p>
+                        {rawDetected && (
+                          <details className="mt-1">
+                            <summary className="text-xs cursor-pointer text-amber-600">Show raw detected text</summary>
+                            <pre className="text-xs mt-1 whitespace-pre-wrap break-all text-gray-600">{rawDetected}</pre>
+                          </details>
+                        )}
+                      </div>
                     </div>
                   )}
-                  <button onClick={resetCapture} className="btn-secondary w-full gap-2">
-                    <RefreshCw size={15} /> Retake photo
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={resetCapture} className="btn-secondary flex-1 gap-1.5">
+                      <RefreshCw size={14} /> Retake
+                    </button>
+                    <button onClick={() => setTab('manual')} className="btn-primary flex-1 gap-1.5">
+                      <Plus size={14} /> Adjust manually
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -274,32 +380,27 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                 <div className="space-y-3">
                   {aiError && (
                     <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600 flex items-center gap-2">
-                      <AlertCircle size={15} />
-                      {aiError}
+                      <AlertCircle size={15} /> {aiError}
                     </div>
                   )}
 
-                  {/* Live camera preview */}
                   {cameraOpen && (
                     <div className="relative rounded-xl overflow-hidden bg-black">
-                      <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full max-h-56 object-cover"
-                      />
-                      <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-3">
+                      <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-64 object-cover" />
+                      <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
+                        Spread cards face-up · good lighting helps
+                      </p>
+                      <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                         <button
                           onClick={captureFromCamera}
-                          className="w-14 h-14 rounded-full bg-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
+                          className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
                         >
-                          <div className="w-11 h-11 rounded-full bg-brand-600" />
+                          <div className="w-12 h-12 rounded-full bg-brand-600" />
                         </button>
                       </div>
                       <button
                         onClick={closeCamera}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center text-lg font-bold"
+                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg leading-none"
                       >×</button>
                     </div>
                   )}
@@ -307,31 +408,22 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                   {!cameraOpen && (
                     <>
                       <div className="rounded-xl border-2 border-dashed border-gray-200 p-8 text-center space-y-2">
-                        <Camera size={36} className="mx-auto text-gray-300" />
-                        <p className="text-sm text-gray-500">Take a photo of the player's remaining cards</p>
-                        <p className="text-xs text-gray-400">AI will detect the cards and calculate points</p>
+                        <Camera size={40} className="mx-auto text-gray-300" />
+                        <p className="text-sm font-medium text-gray-600">Photograph the player's remaining cards</p>
+                        <p className="text-xs text-gray-400">Spread them face-up, good lighting. AI reads the rank from each corner.</p>
                       </div>
-                      <button onClick={openCamera} className="btn-primary w-full py-3 gap-2">
-                        <Camera size={17} /> Open Camera
+                      <button onClick={openCamera} className="btn-primary w-full py-3 gap-2 text-base">
+                        <Camera size={18} /> Open Camera
                       </button>
                       <div className="flex items-center gap-3">
                         <hr className="flex-1 border-gray-200" />
-                        <span className="text-xs text-gray-400">or</span>
+                        <span className="text-xs text-gray-400">or upload a photo</span>
                         <hr className="flex-1 border-gray-200" />
                       </div>
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="btn-secondary w-full gap-2"
-                      >
-                        Upload from gallery
+                      <button onClick={() => fileInputRef.current?.click()} className="btn-secondary w-full gap-2">
+                        Choose from gallery
                       </button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleFileUpload}
-                      />
+                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
                     </>
                   )}
                 </div>
@@ -345,7 +437,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
               {aiDone && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-sm text-blue-700 flex items-center gap-2 mb-2">
                   <Check size={14} />
-                  AI pre-filled the counts — review and adjust if needed.
+                  AI pre-filled — review and adjust if needed.
                 </div>
               )}
               {ALL_RANKS.map(rank => (
@@ -364,7 +456,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                     >
                       <Minus size={14} />
                     </button>
-                    <span className={`w-6 text-center font-semibold ${counts[rank] > 0 ? 'text-brand-700' : 'text-gray-900'}`}>
+                    <span className={`w-6 text-center font-semibold ${counts[rank] > 0 ? 'text-brand-700' : 'text-gray-400'}`}>
                       {counts[rank]}
                     </span>
                     <button
@@ -376,6 +468,13 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                   </div>
                 </div>
               ))}
+
+              {/* Direct total override hint */}
+              <div className="pt-3 pb-1 border-t border-gray-100 text-center">
+                <p className="text-xs text-gray-400">
+                  Tap the score in the top-right to override the total directly.
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -385,7 +484,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
           <button onClick={onCancel} className="btn-secondary flex-1">Cancel</button>
           <button onClick={handleConfirm} className="btn-primary flex-1 gap-2">
             <Check size={16} />
-            Confirm {total} pts
+            Confirm {displayTotal} pts
           </button>
         </div>
       </div>
