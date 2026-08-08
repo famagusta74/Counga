@@ -6,7 +6,7 @@ interface ScoreTableProps {
   rounds: Round[]
   totalScores: Record<string, number>
   targetScore: number
-  status: 'active' | 'finished'
+  status: 'active' | 'finished' | 'abandoned'
   winner: string | null
 }
 
