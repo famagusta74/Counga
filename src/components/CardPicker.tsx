@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import type { CardRank } from '../types'
-import { Camera, Check, RefreshCw, Loader, AlertCircle } from 'lucide-react'
+import { Camera, Check, RefreshCw, Loader, AlertCircle, X } from 'lucide-react'
 
 interface CardPickerProps {
   playerName: string
@@ -24,15 +24,12 @@ const CARD_POINTS: Record<string, number> = {
 
 function parseScoreFromAnnotations(annotations: { description: string }[]): number {
   const fragments = annotations.slice(1).map(a => a.description.trim().toUpperCase())
-  let total = 0
   const tally: Record<string, number> = {}
   for (const f of fragments) {
-    if (CARD_POINTS[f] !== undefined) {
-      tally[f] = (tally[f] ?? 0) + 1
-    }
+    if (CARD_POINTS[f] !== undefined) tally[f] = (tally[f] ?? 0) + 1
   }
+  let total = 0
   for (const [token, count] of Object.entries(tally)) {
-    // Each card corner appears twice — divide by 2, min 1
     const cards = Math.max(1, Math.round(count / 2))
     total += (CARD_POINTS[token] ?? 0) * cards
   }
@@ -55,7 +52,7 @@ async function scoreFromImage(base64: string): Promise<{ score: number; error?: 
   const response = data.responses?.[0]
   if (response?.error) return { score: 0, error: response.error.message }
   const annotations: { description: string }[] = response?.textAnnotations ?? []
-  if (annotations.length === 0) return { score: 0, error: 'No cards detected in photo. Enter score manually.' }
+  if (annotations.length === 0) return { score: 0, error: 'No cards detected. Enter score manually.' }
   return { score: parseScoreFromAnnotations(annotations) }
 }
 
@@ -78,17 +75,17 @@ function compressImage(dataUrl: string): Promise<string> {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CardPicker({ playerName, onConfirm, onCancel }: CardPickerProps) {
-  const [points, setPoints]           = useState('')
+  const [points, setPoints]               = useState('')
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
-  const [analyzing, setAnalyzing]     = useState(false)
-  const [aiError, setAiError]         = useState('')
-  const [cameraOpen, setCameraOpen]   = useState(false)
-  const [stream, setStream]           = useState<MediaStream | null>(null)
+  const [analyzing, setAnalyzing]         = useState(false)
+  const [aiError, setAiError]             = useState('')
+  const [cameraOpen, setCameraOpen]       = useState(false)
+  const [stream, setStream]               = useState<MediaStream | null>(null)
 
-  const videoRef    = useRef<HTMLVideoElement>(null)
+  const videoRef     = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const score = parseInt(points, 10)
+  const score      = parseInt(points, 10)
   const validScore = !isNaN(score) && score >= 0
 
   // ── Camera ──────────────────────────────────────────────────────────────────
@@ -103,7 +100,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
       setCameraOpen(true)
       setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = s }, 100)
     } catch {
-      setAiError('Camera not accessible. Upload a photo instead.')
+      setAiError('Camera not accessible. Use Gallery instead.')
     }
   }, [])
 
@@ -119,9 +116,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     canvas.width  = videoRef.current.videoWidth  || 1280
     canvas.height = videoRef.current.videoHeight || 720
     canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
     closeCamera()
-    runAI(dataUrl)
+    runAI(canvas.toDataURL('image/jpeg', 0.9))
   }, [closeCamera])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,15 +136,10 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setPoints('')
     try {
       const compressed = await compressImage(dataUrl)
-      const base64 = compressed.split(',')[1]
-      const { score: detected, error } = await scoreFromImage(base64)
-      if (error) {
-        setAiError(error)
-      } else if (detected === 0) {
-        setAiError('Could not detect any cards. Enter the score manually.')
-      } else {
-        setPoints(String(detected))
-      }
+      const { score: detected, error } = await scoreFromImage(compressed.split(',')[1])
+      if (error)           setAiError(error)
+      else if (!detected)  setAiError('No cards found. Enter score manually.')
+      else                 setPoints(String(detected))
     } catch (err: unknown) {
       setAiError(err instanceof Error ? err.message : 'Detection failed.')
     } finally {
@@ -156,140 +147,139 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     }
   }
 
-  const reset = () => {
-    setCapturedImage(null)
-    setAiError('')
-    setPoints('')
-  }
+  const reset = () => { setCapturedImage(null); setAiError(''); setPoints('') }
 
-  const handleConfirm = () => {
-    if (!validScore) return
-    onConfirm(score, [])
-  }
+  const handleConfirm = () => { if (validScore) onConfirm(score, []) }
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
+  // Full-screen overlay — content is a simple scrollable page, no sticky footer
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      {/* Sheet: max 90vh so footer is always visible, flex-col keeps footer pinned */}
-      <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl flex flex-col"
-           style={{ maxHeight: '90dvh' }}>
+    <div className="fixed inset-0 z-50 bg-white flex flex-col">
 
-        {/* Header — fixed, never scrolls away */}
-        <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-gray-100">
+      {/* ── Top bar: player name + Cancel ── */}
+      <div className="flex-shrink-0 flex items-center justify-between px-5 pt-safe pt-4 pb-3 border-b border-gray-100 bg-white">
+        <div>
           <p className="text-xs font-semibold text-brand-600 uppercase tracking-wide">Remaining cards</p>
-          <h3 className="text-xl font-bold text-gray-900 mt-0.5">{playerName}</h3>
+          <h2 className="text-lg font-bold text-gray-900 leading-tight">{playerName}</h2>
         </div>
+        <button
+          onClick={onCancel}
+          className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 active:bg-gray-200"
+        >
+          <X size={18} />
+        </button>
+      </div>
 
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-
-          {/* ── Score input ──────────────────────────────────────────────── */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Points</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={points}
-              onChange={e => { setPoints(e.target.value); setCapturedImage(null); setAiError('') }}
-              placeholder="Enter total points…"
-              className="input text-3xl font-bold text-brand-700 text-center py-4 tracking-wide"
-              autoFocus
-            />
-          </div>
-
-          {/* ── Photo section ────────────────────────────────────────────── */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Or scan with camera
-            </label>
-
-            {analyzing && (
-              <div className="flex items-center justify-center gap-3 py-6 text-brand-600 bg-brand-50 rounded-2xl">
-                <Loader size={22} className="animate-spin" />
-                <span className="text-sm font-medium">Detecting cards…</span>
-              </div>
-            )}
-
-            {!analyzing && capturedImage && (
-              <div className="space-y-2">
-                <div className="relative rounded-2xl overflow-hidden">
-                  <img src={capturedImage} alt="Captured" className="w-full max-h-36 object-cover" />
-                  {validScore && (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <span className="text-white text-4xl font-bold drop-shadow-lg">{score} pts</span>
-                    </div>
-                  )}
-                </div>
-                {aiError && (
-                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm text-amber-700">
-                    <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-                    <span>{aiError}</span>
-                  </div>
-                )}
-                <button onClick={reset} className="btn-secondary w-full gap-2 py-2">
-                  <RefreshCw size={14} /> Retake / clear
-                </button>
-              </div>
-            )}
-
-            {!analyzing && !capturedImage && (
-              <>
-                {cameraOpen ? (
-                  <div className="relative rounded-2xl overflow-hidden bg-black">
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-44 object-cover" />
-                    <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
-                      Spread cards face-up in good light
-                    </p>
-                    <div className="absolute bottom-3 left-0 right-0 flex justify-center">
-                      <button
-                        onClick={capturePhoto}
-                        className="w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-brand-600" />
-                      </button>
-                    </div>
-                    <button
-                      onClick={closeCamera}
-                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg"
-                    >×</button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={openCamera} className="btn-secondary flex-1 py-3 gap-2">
-                      <Camera size={17} /> Camera
-                    </button>
-                    <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-3 gap-2">
-                      <Camera size={17} /> Gallery
-                    </button>
-                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-                  </div>
-                )}
-                {aiError && !capturedImage && (
-                  <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600 mt-2">
-                    <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-                    <span>{aiError}</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Footer — pinned to bottom, never hidden */}
-        <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex gap-3 safe-bottom">
-          <button onClick={onCancel} className="btn-secondary flex-1 py-3">Cancel</button>
+      {/* ── Score + Confirm row — always visible, never behind keyboard ── */}
+      <div className="flex-shrink-0 px-5 py-4 bg-gray-50 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={points}
+            onChange={e => { setPoints(e.target.value); setCapturedImage(null); setAiError('') }}
+            placeholder="0"
+            className="flex-1 text-4xl font-bold text-brand-700 text-center py-3 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
+          />
           <button
             onClick={handleConfirm}
             disabled={!validScore}
-            className="btn-primary flex-1 py-3 text-base gap-2"
+            className="flex-shrink-0 w-24 h-16 rounded-2xl bg-brand-600 text-white font-bold text-sm flex flex-col items-center justify-center gap-0.5 disabled:opacity-40 active:bg-brand-700 transition-colors"
           >
-            <Check size={17} />
-            Confirm {validScore ? `${score} pts` : ''}
+            <Check size={20} />
+            <span>Confirm</span>
           </button>
         </div>
+        {validScore && (
+          <p className="text-center text-sm text-gray-500 mt-2">{score} points for {playerName}</p>
+        )}
+      </div>
 
+      {/* ── Scrollable camera / photo section ── */}
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+        <p className="text-sm font-semibold text-gray-700">Or scan cards with camera</p>
+
+        {/* Analyzing */}
+        {analyzing && (
+          <div className="flex flex-col items-center justify-center gap-3 py-10 text-brand-600 bg-brand-50 rounded-2xl">
+            <Loader size={28} className="animate-spin" />
+            <span className="text-sm font-medium">Detecting cards…</span>
+          </div>
+        )}
+
+        {/* Captured image preview */}
+        {!analyzing && capturedImage && (
+          <div className="space-y-3">
+            <div className="relative rounded-2xl overflow-hidden">
+              <img src={capturedImage} alt="Captured" className="w-full max-h-48 object-cover" />
+              {validScore && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                  <span className="text-white text-5xl font-bold drop-shadow-lg">{score}</span>
+                </div>
+              )}
+            </div>
+            {aiError && (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm text-amber-700">
+                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                <span>{aiError}</span>
+              </div>
+            )}
+            <button onClick={reset} className="btn-secondary w-full gap-2">
+              <RefreshCw size={14} /> Retake / clear
+            </button>
+          </div>
+        )}
+
+        {/* Camera / gallery buttons */}
+        {!analyzing && !capturedImage && (
+          <div className="space-y-3">
+            {cameraOpen ? (
+              <div className="relative rounded-2xl overflow-hidden bg-black">
+                <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-56 object-cover" />
+                <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
+                  Spread cards face-up · good lighting
+                </p>
+                <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+                  <button
+                    onClick={capturePhoto}
+                    className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-brand-600" />
+                  </button>
+                </div>
+                <button
+                  onClick={closeCamera}
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg"
+                >×</button>
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <button onClick={openCamera} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
+                  <Camera size={22} />
+                  <span className="text-xs">Camera</span>
+                </button>
+                <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
+                  <Camera size={22} />
+                  <span className="text-xs">Gallery</span>
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+              </div>
+            )}
+
+            {aiError && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600">
+                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                <span>{aiError}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bottom padding so content isn't too close to screen edge */}
+        <div className="h-8" />
       </div>
     </div>
   )
