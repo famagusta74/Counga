@@ -171,21 +171,22 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl flex flex-col">
+      {/* Sheet: max 90vh so footer is always visible, flex-col keeps footer pinned */}
+      <div className="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-2xl flex flex-col"
+           style={{ maxHeight: '90dvh' }}>
 
-        {/* Header */}
-        <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+        {/* Header — fixed, never scrolls away */}
+        <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-gray-100">
           <p className="text-xs font-semibold text-brand-600 uppercase tracking-wide">Remaining cards</p>
           <h3 className="text-xl font-bold text-gray-900 mt-0.5">{playerName}</h3>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
 
           {/* ── Score input ──────────────────────────────────────────────── */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Points
-            </label>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Points</label>
             <input
               type="number"
               inputMode="numeric"
@@ -204,7 +205,6 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
               Or scan with camera
             </label>
 
-            {/* Analyzing spinner */}
             {analyzing && (
               <div className="flex items-center justify-center gap-3 py-6 text-brand-600 bg-brand-50 rounded-2xl">
                 <Loader size={22} className="animate-spin" />
@@ -212,11 +212,10 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
               </div>
             )}
 
-            {/* Captured image preview */}
             {!analyzing && capturedImage && (
               <div className="space-y-2">
                 <div className="relative rounded-2xl overflow-hidden">
-                  <img src={capturedImage} alt="Captured" className="w-full max-h-40 object-cover" />
+                  <img src={capturedImage} alt="Captured" className="w-full max-h-36 object-cover" />
                   {validScore && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                       <span className="text-white text-4xl font-bold drop-shadow-lg">{score} pts</span>
@@ -235,21 +234,20 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
               </div>
             )}
 
-            {/* Camera UI */}
             {!analyzing && !capturedImage && (
               <>
                 {cameraOpen ? (
                   <div className="relative rounded-2xl overflow-hidden bg-black">
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-52 object-cover" />
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-44 object-cover" />
                     <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
                       Spread cards face-up in good light
                     </p>
-                    <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+                    <div className="absolute bottom-3 left-0 right-0 flex justify-center">
                       <button
                         onClick={capturePhoto}
-                        className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
+                        className="w-14 h-14 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
                       >
-                        <div className="w-12 h-12 rounded-full bg-brand-600" />
+                        <div className="w-10 h-10 rounded-full bg-brand-600" />
                       </button>
                     </div>
                     <button
@@ -268,7 +266,6 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                     <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
                   </div>
                 )}
-
                 {aiError && !capturedImage && (
                   <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600 mt-2">
                     <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
@@ -280,9 +277,9 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3 safe-bottom">
-          <button onClick={onCancel} className="btn-secondary flex-1">Cancel</button>
+        {/* Footer — pinned to bottom, never hidden */}
+        <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 flex gap-3 safe-bottom">
+          <button onClick={onCancel} className="btn-secondary flex-1 py-3">Cancel</button>
           <button
             onClick={handleConfirm}
             disabled={!validScore}
