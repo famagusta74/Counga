@@ -10,6 +10,7 @@ interface ScoreTableProps {
   targetScore: number
   status: 'active' | 'finished' | 'abandoned'
   winner: string | null
+  eliminatedPlayers?: string[]
   onEditRound?: (round: Round, newScores: Record<string, number>) => Promise<void>
 }
 
@@ -20,6 +21,7 @@ export default function ScoreTable({
   targetScore,
   status,
   winner,
+  eliminatedPlayers = [],
   onEditRound,
 }: ScoreTableProps) {
   const sorted = [...players].sort(
@@ -107,7 +109,12 @@ export default function ScoreTable({
                   }`}>
                     <div className="flex items-center gap-1.5">
                       <span>{rankMedal(idx + 1)}</span>
-                      <span className="truncate max-w-[80px]">{player.displayName}</span>
+                      <span className={`truncate max-w-[80px] ${eliminatedPlayers.includes(player.uid) ? 'line-through text-gray-400' : ''}`}>
+                        {player.displayName}
+                      </span>
+                      {eliminatedPlayers.includes(player.uid) && (
+                        <span className="text-xs text-red-500 font-normal">out</span>
+                      )}
                     </div>
                   </td>
                   {rounds.map(r => (

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { getRecentGames } from '../firebase/db'
+import { useAuth } from '../contexts/AuthContext'
 import type { Game } from '../types'
-import { Clock, Trophy, ChevronRight, Users } from 'lucide-react'
+import { Clock, Trophy, ChevronRight, Users, UserCheck } from 'lucide-react'
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {
@@ -11,19 +12,69 @@ function formatDate(ts: number): string {
 }
 
 export default function HistoryPage() {
+  const { currentUser, upgradeGuestToGoogle } = useAuth()
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
+  const [upgrading, setUpgrading] = useState(false)
+  const [upgradeError, setUpgradeError] = useState('')
 
   useEffect(() => {
-    getRecentGames(30)
-      .then(setGames)
-      .finally(() => setLoading(false))
-  }, [])
+    // Only load history for verified Google accounts
+    if (currentUser && !currentUser.isGuest) {
+      getRecentGames(30)
+        .then(setGames)
+        .finally(() => setLoading(false))
+    } else {
+      setLoading(false)
+    }
+  }, [currentUser])
+
+  const handleUpgrade = async () => {
+    setUpgrading(true)
+    setUpgradeError('')
+    try {
+      await upgradeGuestToGoogle()
+    } catch {
+      setUpgradeError('Could not link Google account. Try again.')
+    } finally {
+      setUpgrading(false)
+    }
+  }
 
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600" />
+      </div>
+    )
+  }
+
+  // Guest wall
+  if (currentUser?.isGuest) {
+    return (
+      <div className="space-y-4 pb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">History</h1>
+          <p className="text-sm text-gray-500 mt-1">Only available for Google accounts</p>
+        </div>
+        <div className="card text-center py-10 space-y-4">
+          <Clock size={40} className="mx-auto text-gray-300" />
+          <div>
+            <p className="font-semibold text-gray-700">Sign in with Google to see history</p>
+            <p className="text-sm text-gray-400 mt-1">
+              Guest sessions are not saved. Link your Google account to keep a permanent record of all your games.
+            </p>
+          </div>
+          {upgradeError && (
+            <p className="text-sm text-red-600">{upgradeError}</p>
+          )}
+          <button onClick={handleUpgrade} disabled={upgrading} className="btn-primary mx-auto gap-2">
+            {upgrading
+              ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+              : <><UserCheck size={16} /> Sign in with Google</>
+            }
+          </button>
+        </div>
       </div>
     )
   }

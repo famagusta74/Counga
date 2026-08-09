@@ -43,6 +43,7 @@ export async function createGame(
     targetScore,
     status: 'active',
     players,
+    eliminatedPlayers: [],
     totalScores,
     winner: null,
     createdAt: Date.now(),
@@ -57,7 +58,9 @@ export async function createGame(
 export async function getGame(gameId: string): Promise<Game | null> {
   const snap = await getDoc(doc(db, 'games', gameId))
   if (!snap.exists()) return null
-  return { id: snap.id, ...snap.data() } as Game
+  const data = snap.data() as Omit<Game, 'id'>
+  // Back-compat: old games without eliminatedPlayers
+  return { id: snap.id, eliminatedPlayers: [], ...data } as Game
 }
 
 export async function addRound(
@@ -78,30 +81,50 @@ export async function addRound(
   const gameSnap = await getDoc(gameRef)
   if (!gameSnap.exists()) return
 
-  const game = gameSnap.data() as Game
+  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
   const newTotals = { ...game.totalScores }
   Object.entries(scores).forEach(([uid, pts]) => {
     newTotals[uid] = (newTotals[uid] ?? 0) + pts
   })
 
-  // Check if any player reached target → finish game
-  const hasReachedTarget = Object.values(newTotals).some(s => s >= game.targetScore)
-  let winner: string | null = null
-  let status: 'active' | 'finished' = 'active'
+  // Work out who is newly eliminated (exceeded target this round)
+  const newlyEliminated = Object.entries(newTotals)
+    .filter(([uid, pts]) =>
+      pts >= game.targetScore &&
+      !game.eliminatedPlayers.includes(uid)
+    )
+    .map(([uid]) => uid)
 
-  if (hasReachedTarget) {
+  const allEliminated = [...game.eliminatedPlayers, ...newlyEliminated]
+
+  // Active players = total players minus eliminated
+  const activePlayers = game.players.filter(p => !allEliminated.includes(p.uid))
+
+  // Game ends when only 1 (or 0) active players remain
+  let status: Game['status'] = 'active'
+  let winner: string | null = null
+  let finishedAt: number | null = null
+
+  if (activePlayers.length <= 1) {
     status = 'finished'
-    // Winner is the player with LOWEST total
-    winner = Object.entries(newTotals).reduce<string>((best, [uid, pts]) => {
-      return pts < (newTotals[best] ?? Infinity) ? uid : best
-    }, Object.keys(newTotals)[0])
+    finishedAt = Date.now()
+    if (activePlayers.length === 1) {
+      // Last player standing wins
+      winner = activePlayers[0].uid
+    } else {
+      // Everyone reached target simultaneously — pick lowest score
+      winner = Object.entries(newTotals).reduce<string>((best, [uid, pts]) => {
+        return pts < (newTotals[best] ?? Infinity) ? uid : best
+      }, Object.keys(newTotals)[0])
+    }
   }
 
   await updateDoc(gameRef, {
     totalScores: newTotals,
+    eliminatedPlayers: allEliminated,
     status,
     winner,
-    finishedAt: status === 'finished' ? Date.now() : null,
+    finishedAt,
   })
 }
 
@@ -116,7 +139,11 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
   const snap = await getDocs(
     query(collection(db, 'games'), orderBy('createdAt', 'desc'), limit(count))
   )
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Game))
+  return snap.docs.map(d => ({
+    id: d.id,
+    eliminatedPlayers: [],
+    ...d.data(),
+  } as Game))
 }
 
 /** Returns the active game created by the current user, if any */
@@ -132,7 +159,7 @@ export async function getActiveGameForUser(uid: string): Promise<Game | null> {
   )
   if (snap.empty) return null
   const d = snap.docs[0]
-  return { id: d.id, ...d.data() } as Game
+  return { id: d.id, eliminatedPlayers: [], ...d.data() } as Game
 }
 
 /** Abandons a game without a winner */
@@ -163,22 +190,28 @@ export async function updateRound(
   ])
 
   if (!gameSnap.exists()) return
-  const game = gameSnap.data() as Game
+  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
 
   // 3. Sum every round's scores from scratch
   const newTotals: Record<string, number> = {}
   game.players.forEach(p => { newTotals[p.uid] = 0 })
 
   allRoundsSnap.docs.forEach(d => {
-    // Use the freshly saved scores for the edited round, stored scores for the rest
     const scores = d.id === roundId ? newScores : (d.data().scores ?? {}) as Record<string, number>
     Object.entries(scores).forEach(([uid, pts]) => {
       newTotals[uid] = (newTotals[uid] ?? 0) + pts
     })
   })
 
-  // 4. Persist the recomputed totals
-  await updateDoc(gameRef, { totalScores: newTotals })
+  // 4. Recompute eliminations from new totals
+  const newEliminated = game.players
+    .filter(p => (newTotals[p.uid] ?? 0) >= game.targetScore)
+    .map(p => p.uid)
+
+  await updateDoc(gameRef, {
+    totalScores: newTotals,
+    eliminatedPlayers: newEliminated,
+  })
 }
 
 export async function finishGameManually(gameId: string): Promise<void> {
@@ -186,10 +219,14 @@ export async function finishGameManually(gameId: string): Promise<void> {
   const gameSnap = await getDoc(gameRef)
   if (!gameSnap.exists()) return
 
-  const game = gameSnap.data() as Game
-  const winner = Object.entries(game.totalScores).reduce<string>((best, [uid, pts]) => {
-    return pts < (game.totalScores[best] ?? Infinity) ? uid : best
-  }, Object.keys(game.totalScores)[0])
+  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
+
+  // Winner = lowest score among non-eliminated players (or all if none active)
+  const activePlayers = game.players.filter(p => !game.eliminatedPlayers.includes(p.uid))
+  const pool = activePlayers.length > 0 ? activePlayers : game.players
+  const winner = pool.reduce<string>((best, p) => {
+    return (game.totalScores[p.uid] ?? 0) < (game.totalScores[best] ?? Infinity) ? p.uid : best
+  }, pool[0].uid)
 
   await updateDoc(gameRef, {
     status: 'finished',

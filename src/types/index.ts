@@ -37,6 +37,7 @@ export interface Game {
   targetScore: number
   status: 'active' | 'finished' | 'abandoned'
   players: Player[]
+  eliminatedPlayers: string[]          // uids of players who exceeded targetScore
   totalScores: Record<string, number>  // uid -> cumulative points
   winner: string | null                // uid of winner
   createdAt: number

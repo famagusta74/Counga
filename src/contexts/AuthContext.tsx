@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import type { User } from 'firebase/auth'
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, linkWithPopup } from 'firebase/auth'
 import {
   auth,
   googleProvider,
@@ -16,6 +16,7 @@ interface AuthContextValue {
   loading: boolean
   signInWithGoogle: () => Promise<void>
   signInAsGuest: (displayName: string) => Promise<void>
+  upgradeGuestToGoogle: () => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -69,6 +70,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sessionStorage.setItem('guestName', appUser.displayName)
   }
 
+  const upgradeGuestToGoogle = async () => {
+    if (!auth.currentUser) return
+    // Link the anonymous account to a Google credential
+    const result = await linkWithPopup(auth.currentUser, googleProvider)
+    const appUser = firebaseUserToAppUser(result.user, false)
+    setCurrentUser(appUser)
+    await upsertUser(appUser)
+    sessionStorage.removeItem('guestName')
+  }
+
   const logout = async () => {
     await signOut(auth)
     sessionStorage.removeItem('guestName')
@@ -76,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, signInWithGoogle, signInAsGuest, logout }}>
+    <AuthContext.Provider value={{ currentUser, loading, signInWithGoogle, signInAsGuest, upgradeGuestToGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   )
