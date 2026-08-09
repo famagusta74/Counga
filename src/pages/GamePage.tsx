@@ -28,6 +28,7 @@ export default function GamePage() {
   const [submitting, setSubmitting]     = useState(false)
   const [showFinishConfirm, setShowFinishConfirm] = useState(false)
   const [postRound, setPostRound]       = useState<PostRoundState>('idle')
+  const [endingGame, setEndingGame]     = useState(false)
   const [newlyEliminated, setNewlyEliminated] = useState<string[]>([])
   const [upgradingGuest, setUpgradingGuest]   = useState(false)
   const [upgradeError, setUpgradeError]       = useState('')
@@ -114,11 +115,12 @@ export default function GamePage() {
   }
 
   const handlePostRoundEnd = async () => {
-    setPostRound('finishing')
+    setEndingGame(true)
     if (!gameId) return
     await finishGameManually(gameId)
     await load()
     setPostRound('idle')
+    setEndingGame(false)
     setNewlyEliminated([])
   }
 
@@ -322,10 +324,10 @@ export default function GamePage() {
               </button>
               <button
                 onClick={handlePostRoundEnd}
-                disabled={postRound === 'finishing'}
+                disabled={endingGame}
                 className="btn-secondary w-full py-2.5 gap-2"
               >
-                {postRound === 'finishing'
+                {endingGame
                   ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500" />
                   : <><Flag size={15} /> End game now</>
                 }

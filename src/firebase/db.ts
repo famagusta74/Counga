@@ -58,9 +58,12 @@ export async function createGame(
 export async function getGame(gameId: string): Promise<Game | null> {
   const snap = await getDoc(doc(db, 'games', gameId))
   if (!snap.exists()) return null
-  const data = snap.data() as Omit<Game, 'id'>
-  // Back-compat: old games without eliminatedPlayers
-  return { id: snap.id, eliminatedPlayers: [], ...data } as Game
+  const data = snap.data() as Record<string, unknown>
+  return {
+    eliminatedPlayers: [],
+    ...data,
+    id: snap.id,
+  } as unknown as Game
 }
 
 export async function addRound(
@@ -81,7 +84,7 @@ export async function addRound(
   const gameSnap = await getDoc(gameRef)
   if (!gameSnap.exists()) return
 
-  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
+  const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
   const newTotals = { ...game.totalScores }
   Object.entries(scores).forEach(([uid, pts]) => {
     newTotals[uid] = (newTotals[uid] ?? 0) + pts
@@ -140,10 +143,10 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
     query(collection(db, 'games'), orderBy('createdAt', 'desc'), limit(count))
   )
   return snap.docs.map(d => ({
-    id: d.id,
-    eliminatedPlayers: [],
+    eliminatedPlayers: [] as string[],
     ...d.data(),
-  } as Game))
+    id: d.id,
+  } as unknown as Game))
 }
 
 /** Returns the active game created by the current user, if any */
@@ -159,7 +162,7 @@ export async function getActiveGameForUser(uid: string): Promise<Game | null> {
   )
   if (snap.empty) return null
   const d = snap.docs[0]
-  return { id: d.id, eliminatedPlayers: [], ...d.data() } as Game
+  return { eliminatedPlayers: [] as string[], ...d.data(), id: d.id } as unknown as Game
 }
 
 /** Abandons a game without a winner */
@@ -190,7 +193,7 @@ export async function updateRound(
   ])
 
   if (!gameSnap.exists()) return
-  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
+  const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
 
   // 3. Sum every round's scores from scratch
   const newTotals: Record<string, number> = {}
@@ -219,7 +222,7 @@ export async function finishGameManually(gameId: string): Promise<void> {
   const gameSnap = await getDoc(gameRef)
   if (!gameSnap.exists()) return
 
-  const game = { eliminatedPlayers: [], ...gameSnap.data() } as Game
+  const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
 
   // Winner = lowest score among non-eliminated players (or all if none active)
   const activePlayers = game.players.filter(p => !game.eliminatedPlayers.includes(p.uid))
