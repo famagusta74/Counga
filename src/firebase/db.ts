@@ -71,11 +71,13 @@ export async function addRound(
   gameId: string,
   scores: Record<string, number>,
   roundNumber: number,
+  roundWinnerUid: string | null = null,
 ): Promise<void> {
   const roundRef = doc(collection(db, 'games', gameId, 'rounds'))
   const round: Omit<Round, 'id'> = {
     roundNumber,
     scores,
+    roundWinnerUid,
     createdAt: Date.now(),
   }
   await setDoc(roundRef, round)

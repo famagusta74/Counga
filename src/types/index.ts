@@ -28,6 +28,7 @@ export interface Round {
   id: string
   roundNumber: number
   scores: Record<string, number>   // uid -> points this round
+  roundWinnerUid: string | null    // uid of the player who won this round (0 pts)
   createdAt: number
 }
 

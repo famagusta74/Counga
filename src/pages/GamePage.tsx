@@ -6,7 +6,7 @@ import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
 import { useAuth } from '../contexts/AuthContext'
-import { Trophy, Plus, Flag, UserCheck } from 'lucide-react'
+import { Trophy, Plus, Flag, UserCheck, Star } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number   // index into activePlayers array
@@ -33,6 +33,11 @@ export default function GamePage() {
   const [upgradingGuest, setUpgradingGuest]   = useState(false)
   const [upgradeError, setUpgradeError]       = useState('')
 
+  // Round winner flow
+  const [roundWinnerUid, setRoundWinnerUid]         = useState<string | null>(null)
+  const [showWinnerPrompt, setShowWinnerPrompt]     = useState(false)
+  const [suggestedWinnerUid, setSuggestedWinnerUid] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     if (!gameId) return
     const [g, rs] = await Promise.all([getGame(gameId), getRounds(gameId)])
@@ -48,14 +53,18 @@ export default function GamePage() {
     p => !(game?.eliminatedPlayers ?? []).includes(p.uid)
   )
 
-  // ── Start new round ─────────────────────────────────────────────────────────
+  // ── Start new round ──────────────────────────────────────────────────────────
 
   const startNewRound = () => {
     if (!game || activePlayers.length === 0) return
+    setRoundWinnerUid(null)
+    setSuggestedWinnerUid(null)
     setPickerState({ playerIndex: 0, scores: {} })
     setAddingRound(true)
   }
 
+  // After each player's score is confirmed, check if the next player
+  // can be auto-suggested as the round winner (all previous scores > 0)
   const handleCardConfirm = (score: number, _cards: { rank: CardRank; count: number }[]) => {
     if (!game || !pickerState) return
     const player = activePlayers[pickerState.playerIndex]
@@ -63,23 +72,56 @@ export default function GamePage() {
     const nextIndex = pickerState.playerIndex + 1
 
     if (nextIndex < activePlayers.length) {
-      setPickerState({ playerIndex: nextIndex, scores: newScores })
+      // Check: if ALL scores collected so far are > 0, suggest next player as winner
+      const allAboveZero = Object.values(newScores).every(s => s > 0)
+      if (allAboveZero && roundWinnerUid === null) {
+        // Suggest the next player as the round winner
+        setSuggestedWinnerUid(activePlayers[nextIndex].uid)
+        setPickerState({ playerIndex: nextIndex, scores: newScores })
+        setShowWinnerPrompt(true)
+      } else {
+        setPickerState({ playerIndex: nextIndex, scores: newScores })
+      }
     } else {
       submitRound(newScores)
     }
   }
 
+  // User confirms the suggested player is the round winner → assign 0 pts and close round
+  const handleConfirmWinner = () => {
+    if (!pickerState || !suggestedWinnerUid) return
+    const winnerUid = suggestedWinnerUid
+    setRoundWinnerUid(winnerUid)
+    setShowWinnerPrompt(false)
+    // Set this player's score to 0 and close the round
+    const finalScores = { ...pickerState.scores, [winnerUid]: 0 }
+    // Fill any remaining unscored players with 0 too (safety)
+    activePlayers.forEach(p => {
+      if (!(p.uid in finalScores)) finalScores[p.uid] = 0
+    })
+    submitRound(finalScores, winnerUid)
+  }
+
+  // User dismisses the suggestion — open CardPicker for the suggested player normally
+  const handleDismissWinnerPrompt = () => {
+    setShowWinnerPrompt(false)
+    setSuggestedWinnerUid(null)
+  }
+
   const handlePickerCancel = () => {
     setPickerState(null)
     setAddingRound(false)
+    setShowWinnerPrompt(false)
+    setSuggestedWinnerUid(null)
+    setRoundWinnerUid(null)
   }
 
-  const submitRound = async (scores: Record<string, number>) => {
+  const submitRound = async (scores: Record<string, number>, winnerUid: string | null = roundWinnerUid) => {
     if (!gameId || !game) return
     setSubmitting(true)
     const prevEliminated = game.eliminatedPlayers ?? []
     try {
-      await addRound(gameId, scores, rounds.length + 1)
+      await addRound(gameId, scores, rounds.length + 1, winnerUid)
       const updated = await getGame(gameId)
       const rs = await getRounds(gameId)
       setGame(updated)
@@ -87,17 +129,14 @@ export default function GamePage() {
 
       if (!updated) return
 
-      // Detect who was newly eliminated this round
       const justEliminated = (updated.eliminatedPlayers ?? []).filter(
         uid => !prevEliminated.includes(uid)
       )
       setNewlyEliminated(justEliminated)
 
       if (updated.status === 'finished') {
-        // Game auto-ended — just show the result
         setPostRound('idle')
       } else {
-        // Ask: continue or end?
         setPostRound('asking')
       }
     } catch (e) {
@@ -106,6 +145,8 @@ export default function GamePage() {
       setSubmitting(false)
       setPickerState(null)
       setAddingRound(false)
+      setRoundWinnerUid(null)
+      setSuggestedWinnerUid(null)
     }
   }
 
@@ -137,7 +178,7 @@ export default function GamePage() {
     setShowFinishConfirm(false)
   }
 
-  // ── Guest upgrade ────────────────────────────────────────────────────────────
+  // ── Guest upgrade ─────────────────────────────────────────────────────────────
 
   const handleUpgradeGuest = async () => {
     setUpgradingGuest(true)
@@ -152,7 +193,7 @@ export default function GamePage() {
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -173,6 +214,9 @@ export default function GamePage() {
 
   const winnerPlayer = game.winner ? game.players.find(p => p.uid === game.winner) : null
   const eliminated   = game.eliminatedPlayers ?? []
+  const suggestedWinnerPlayer = suggestedWinnerUid
+    ? activePlayers.find(p => p.uid === suggestedWinnerUid)
+    : null
 
   return (
     <div className="space-y-4 pb-6">
@@ -217,7 +261,7 @@ export default function GamePage() {
         <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{upgradeError}</p>
       )}
 
-      {/* Winner banner */}
+      {/* Game winner banner */}
       {game.status === 'finished' && winnerPlayer && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
           <Trophy size={24} className="text-amber-500 flex-shrink-0" />
@@ -282,6 +326,49 @@ export default function GamePage() {
         <button onClick={() => navigate('/new-game')} className="btn-primary w-full py-3">
           Start New Game
         </button>
+      )}
+
+      {/* ── Round winner suggestion prompt ── */}
+      {showWinnerPrompt && suggestedWinnerPlayer && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+
+            {/* Header */}
+            <div className="bg-brand-950 text-white px-5 py-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-400/20 flex items-center justify-center flex-shrink-0">
+                <Star size={20} className="text-amber-300" fill="currentColor" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base">Round winner?</h3>
+                <p className="text-xs text-brand-300 mt-0.5">All other players have cards remaining</p>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-center">
+                <p className="text-xs text-amber-600 uppercase font-semibold tracking-wide mb-1">Suggested winner</p>
+                <p className="text-2xl font-bold text-amber-900">{suggestedWinnerPlayer.displayName}</p>
+                <p className="text-sm text-amber-700 mt-1">Gets <strong>0 points</strong> this round</p>
+              </div>
+
+              <button
+                onClick={handleConfirmWinner}
+                className="btn-primary w-full py-3.5 text-base gap-2"
+              >
+                <Star size={18} fill="currentColor" />
+                Yes — {suggestedWinnerPlayer.displayName} won this round
+              </button>
+
+              <button
+                onClick={handleDismissWinnerPrompt}
+                className="btn-secondary w-full py-2.5"
+              >
+                No — enter their cards instead
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Post-round dialog ── */}
@@ -353,8 +440,8 @@ export default function GamePage() {
         </div>
       )}
 
-      {/* Card picker — key forces full remount per player */}
-      {addingRound && pickerState && (
+      {/* Card picker — shown only when NOT showing the winner prompt */}
+      {addingRound && pickerState && !showWinnerPrompt && (
         <CardPicker
           key={`${pickerState.playerIndex}-${activePlayers[pickerState.playerIndex]?.uid}`}
           playerName={activePlayers[pickerState.playerIndex]?.displayName ?? ''}

@@ -117,11 +117,21 @@ export default function ScoreTable({
                       )}
                     </div>
                   </td>
-                  {rounds.map(r => (
-                    <td key={r.id} className="py-2.5 px-3 text-center text-gray-600">
-                      {r.scores[player.uid] ?? '—'}
-                    </td>
-                  ))}
+                  {rounds.map(r => {
+                    const cellScore = r.scores[player.uid]
+                    const isRoundWinner = r.roundWinnerUid === player.uid
+                    return (
+                      <td
+                        key={r.id}
+                        className={`py-2.5 px-3 text-center ${isRoundWinner ? 'text-amber-600 font-bold bg-amber-50' : 'text-gray-600'}`}
+                      >
+                        {isRoundWinner
+                          ? <span title="Round winner">⭐ 0</span>
+                          : (cellScore ?? '—')
+                        }
+                      </td>
+                    )
+                  })}
                   <td className={`py-2.5 px-3 text-right font-bold ${
                     isOver ? 'text-red-600' : 'text-gray-900'
                   }`}>
