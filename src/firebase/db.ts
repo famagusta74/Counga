@@ -224,7 +224,7 @@ export interface ScanFeedbackPayload {
   imageBase64: string               // compressed jpeg base64 (no data: prefix)
   detectedTokens: { token: string; points: number; count: number }[]
   aiScore: number
-  correctedScore: number
+  correctedScore?: number           // filled in at confirm time; absent = no correction
   playerName: string
   gameId: string | null
 }

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import type { CardRank } from '../types'
-import { Camera, Check, RefreshCw, Loader, AlertCircle, X, ThumbsDown, ThumbsUp, Send } from 'lucide-react'
+import { Camera, Check, RefreshCw, Loader, AlertCircle, X, ImageIcon } from 'lucide-react'
 import { saveScanFeedback } from '../firebase/db'
 
 interface CardPickerProps {
@@ -22,7 +22,6 @@ const CARD_POINTS: Record<string, number> = {
   'JOKER': 25, 'JKR': 25,
 }
 
-// Friendly display names
 const TOKEN_LABEL: Record<string, string> = {
   'A': 'Ace', 'ACE': 'Ace',
   'K': 'King', 'KING': 'King',
@@ -32,10 +31,10 @@ const TOKEN_LABEL: Record<string, string> = {
 }
 
 export interface DetectedToken {
-  token: string   // canonical key, e.g. "A", "10", "JOKER"
-  label: string   // display, e.g. "Ace", "10", "Joker"
+  token: string
+  label: string
   points: number
-  count: number   // number of cards detected
+  count: number
 }
 
 function parseDetection(annotations: { description: string }[]): {
@@ -47,19 +46,10 @@ function parseDetection(annotations: { description: string }[]): {
   for (const f of fragments) {
     if (CARD_POINTS[f] !== undefined) tally[f] = (tally[f] ?? 0) + 1
   }
-
-  // Vision returns each corner label twice per card (top-left + bottom-right)
-  // so raw count ÷ 2 ≈ number of physical cards
   const tokens: DetectedToken[] = Object.entries(tally).map(([token, raw]) => {
     const count = Math.max(1, Math.round(raw / 2))
-    return {
-      token,
-      label: TOKEN_LABEL[token] ?? token,
-      points: CARD_POINTS[token],
-      count,
-    }
+    return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token], count }
   })
-
   const score = tokens.reduce((sum, t) => sum + t.points * t.count, 0)
   return { tokens, score }
 }
@@ -74,10 +64,7 @@ async function analyseImage(base64: string): Promise<{
   error?: string
 }> {
   const body = {
-    requests: [{
-      image: { content: base64 },
-      features: [{ type: 'TEXT_DETECTION', maxResults: 100 }],
-    }],
+    requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION', maxResults: 100 }] }],
   }
   const resp = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
@@ -111,23 +98,24 @@ function compressImage(dataUrl: string): Promise<string> {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CardPicker({ playerName, onConfirm, onCancel }: CardPickerProps) {
-  // Try to get gameId from route params (may be undefined outside game route)
   const params = useParams<{ gameId?: string }>()
   const gameId = params.gameId ?? null
 
-  const [points, setPoints]                   = useState('')
-  const [capturedImage, setCapturedImage]     = useState<string | null>(null)
-  const [compressedB64, setCompressedB64]     = useState<string | null>(null)   // for feedback
-  const [analyzing, setAnalyzing]             = useState(false)
-  const [aiError, setAiError]                 = useState('')
-  const [detectedTokens, setDetectedTokens]   = useState<DetectedToken[]>([])
-  const [aiScore, setAiScore]                 = useState<number | null>(null)
-  const [cameraOpen, setCameraOpen]           = useState(false)
-  const [stream, setStream]                   = useState<MediaStream | null>(null)
+  // ── phase: 'shoot' → user hasn't taken a photo yet
+  //          'review' → photo taken, AI run, user can edit score & save
+  const [phase, setPhase]                   = useState<'shoot' | 'review'>('shoot')
 
-  // Feedback state
-  const [feedbackState, setFeedbackState]     = useState<'idle' | 'sending' | 'sent'>('idle')
-  const [feedbackError, setFeedbackError]     = useState('')
+  const [capturedImage, setCapturedImage]   = useState<string | null>(null)
+  const [compressedB64, setCompressedB64]   = useState<string | null>(null)
+  const [analyzing, setAnalyzing]           = useState(false)
+  const [aiError, setAiError]               = useState('')
+  const [detectedTokens, setDetectedTokens] = useState<DetectedToken[]>([])
+  const [aiScore, setAiScore]               = useState<number | null>(null)
+  const [points, setPoints]                 = useState('')
+  const [saving, setSaving]                 = useState(false)
+
+  const [cameraOpen, setCameraOpen]         = useState(false)
+  const [stream, setStream]                 = useState<MediaStream | null>(null)
 
   const videoRef     = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -135,10 +123,7 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
   const score      = parseInt(points, 10)
   const validScore = !isNaN(score) && score >= 0
 
-  // User changed the score away from AI suggestion → offer feedback
-  const scoreWasEdited = aiScore !== null && validScore && score !== aiScore
-
-  // ── Camera ──────────────────────────────────────────────────────────────────
+  // ── Camera helpers ────────────────────────────────────────────────────────────
 
   const openCamera = useCallback(async () => {
     setAiError('')
@@ -179,6 +164,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     e.target.value = ''
   }
 
+  // ── STEP 1: capture → compress → save image → run AI ─────────────────────────
+
   const runAI = async (dataUrl: string) => {
     setCapturedImage(dataUrl)
     setAnalyzing(true)
@@ -186,18 +173,27 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setPoints('')
     setDetectedTokens([])
     setAiScore(null)
-    setFeedbackState('idle')
-    setFeedbackError('')
+    setPhase('review')
+
     try {
       const compressed = await compressImage(dataUrl)
       const b64 = compressed.split(',')[1]
       setCompressedB64(b64)
+
+      // ── STEP 1: save image to Firestore immediately (no score yet) ──
+      saveScanFeedback({
+        imageBase64: b64,
+        detectedTokens: [],
+        aiScore: 0,
+        playerName,
+        gameId,
+      }).catch(err => console.warn('Image save failed:', err))
+
       const { tokens, score: detected, error } = await analyseImage(b64)
       setDetectedTokens(tokens)
+
       if (error) {
         setAiError(error)
-      } else if (!detected && tokens.length === 0) {
-        setAiError('No cards found. Enter score manually.')
       } else {
         setAiScore(detected)
         setPoints(String(detected))
@@ -209,48 +205,45 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     }
   }
 
-  const reset = () => {
+  const retake = () => {
     setCapturedImage(null)
     setCompressedB64(null)
     setAiError('')
     setPoints('')
     setDetectedTokens([])
     setAiScore(null)
-    setFeedbackState('idle')
-    setFeedbackError('')
+    setPhase('shoot')
   }
 
-  const handleConfirm = () => { if (validScore) onConfirm(score, []) }
+  // ── STEP 3: save score (+ feedback if score was corrected) ───────────────────
 
-  // ── Feedback submission ──────────────────────────────────────────────────────
-
-  const handleSendFeedback = async () => {
-    if (!compressedB64 || aiScore === null || !validScore) return
-    setFeedbackState('sending')
-    setFeedbackError('')
+  const handleSave = async () => {
+    if (!validScore) return
+    setSaving(true)
     try {
-      await saveScanFeedback({
-        imageBase64: compressedB64,
-        detectedTokens,
-        aiScore,
-        correctedScore: score,
-        playerName,
-        gameId,
-      })
-      setFeedbackState('sent')
-    } catch (e: unknown) {
-      setFeedbackError('Could not save feedback. Try again.')
-      setFeedbackState('idle')
-      console.error(e)
+      // If user corrected the AI score, save the correction as feedback
+      if (compressedB64 && aiScore !== null && score !== aiScore) {
+        await saveScanFeedback({
+          imageBase64: compressedB64,
+          detectedTokens,
+          aiScore,
+          correctedScore: score,
+          playerName,
+          gameId,
+        }).catch(err => console.warn('Feedback save failed:', err))
+      }
+      onConfirm(score, [])
+    } finally {
+      setSaving(false)
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
 
-      {/* ── Top bar ── */}
+      {/* Top bar — always visible */}
       <div className="flex-shrink-0 flex items-center justify-between px-5 pt-safe pt-4 pb-3 border-b border-gray-100 bg-white">
         <div>
           <p className="text-xs font-semibold text-brand-600 uppercase tracking-wide">Remaining cards</p>
@@ -264,191 +257,204 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
         </button>
       </div>
 
-      {/* ── Score + Confirm row ── */}
-      <div className="flex-shrink-0 px-5 py-4 bg-gray-50 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={points}
-            onChange={e => { setPoints(e.target.value); setFeedbackState('idle'); setFeedbackError('') }}
-            placeholder="0"
-            className="flex-1 text-4xl font-bold text-brand-700 text-center py-3 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
-          />
-          <button
-            onClick={handleConfirm}
-            disabled={!validScore}
-            className="flex-shrink-0 w-24 h-16 rounded-2xl bg-brand-600 text-white font-bold text-sm flex flex-col items-center justify-center gap-0.5 disabled:opacity-40 active:bg-brand-700 transition-colors"
-          >
-            <Check size={20} />
-            <span>Confirm</span>
-          </button>
-        </div>
-        {validScore && (
-          <p className="text-center text-sm text-gray-500 mt-2">{score} points for {playerName}</p>
-        )}
-      </div>
+      {/* ── SHOOT PHASE ── */}
+      {phase === 'shoot' && (
+        <div className="flex-1 flex flex-col px-5 py-5 gap-4 overflow-y-auto">
 
-      {/* ── Scrollable body ── */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Manual entry shortcut */}
+          <p className="text-sm text-gray-500 text-center">Take a photo of the cards, or enter the score manually below.</p>
 
-        <p className="text-sm font-semibold text-gray-700">Or scan cards with camera</p>
-
-        {/* Analyzing spinner */}
-        {analyzing && (
-          <div className="flex flex-col items-center justify-center gap-3 py-10 text-brand-600 bg-brand-50 rounded-2xl">
-            <Loader size={28} className="animate-spin" />
-            <span className="text-sm font-medium">Detecting cards…</span>
-          </div>
-        )}
-
-        {/* Post-analysis: image + detection breakdown */}
-        {!analyzing && capturedImage && (
-          <div className="space-y-3">
-
-            {/* Photo preview */}
-            <div className="relative rounded-2xl overflow-hidden border border-gray-200">
-              <img src={capturedImage} alt="Captured" className="w-full max-h-52 object-cover" />
-              {validScore && (
-                <div className="absolute bottom-0 left-0 right-0 bg-black/50 py-2 text-center">
-                  <span className="text-white text-2xl font-bold">{score} pts</span>
-                </div>
-              )}
-            </div>
-
-            {/* Detection breakdown */}
-            {detectedTokens.length > 0 && (
-              <div className="bg-gray-50 rounded-2xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                    AI detected — {detectedTokens.length} card type{detectedTokens.length !== 1 ? 's' : ''}
-                  </span>
-                  <span className="text-xs text-brand-700 font-bold">= {aiScore} pts</span>
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {detectedTokens.map(t => (
-                    <div key={t.token} className="flex items-center justify-between px-4 py-2.5">
-                      <div className="flex items-center gap-3">
-                        {/* Card chip */}
-                        <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-white border-2 border-gray-300 font-bold text-sm text-gray-800 shadow-sm">
-                          {t.token === 'JOKER' || t.token === 'JKR' ? '🃏' : t.token}
-                        </span>
-                        <div>
-                          <p className="text-sm font-medium text-gray-800">{t.label}</p>
-                          <p className="text-xs text-gray-400">{t.count} card{t.count !== 1 ? 's' : ''} × {t.points} pts</p>
-                        </div>
-                      </div>
-                      <span className="text-sm font-bold text-brand-700">{t.points * t.count}</span>
-                    </div>
-                  ))}
-                </div>
-                {/* Total row */}
-                <div className="px-4 py-2.5 bg-brand-50 border-t border-brand-100 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-brand-700">AI Total</span>
-                  <span className="text-sm font-bold text-brand-700">{aiScore} pts</span>
-                </div>
-              </div>
-            )}
-
-            {/* AI error (no cards found) */}
-            {aiError && (
-              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm text-amber-700">
-                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-                <span>{aiError}</span>
-              </div>
-            )}
-
-            {/* Feedback panel — shown when user has changed the score */}
-            {scoreWasEdited && feedbackState !== 'sent' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 space-y-2.5">
-                <div className="flex items-start gap-2">
-                  <ThumbsDown size={15} className="text-blue-500 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-blue-800">
-                    <p className="font-semibold">AI got it wrong?</p>
-                    <p className="text-xs text-blue-600 mt-0.5">
-                      AI detected <strong>{aiScore} pts</strong>, you corrected to <strong>{score} pts</strong>.
-                      {' '}Submit feedback so the detection improves over time.
-                    </p>
-                  </div>
-                </div>
-                {feedbackError && (
-                  <p className="text-xs text-red-600">{feedbackError}</p>
-                )}
+          {/* Camera live view */}
+          {cameraOpen ? (
+            <div className="relative rounded-2xl overflow-hidden bg-black flex-shrink-0">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-64 object-cover" />
+              <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
+                Spread cards face-up · good lighting
+              </p>
+              <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                 <button
-                  onClick={handleSendFeedback}
-                  disabled={feedbackState === 'sending'}
-                  className="btn-primary w-full py-2.5 text-sm gap-2"
+                  onClick={capturePhoto}
+                  className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
                 >
-                  {feedbackState === 'sending'
-                    ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    : <><Send size={14} /> Submit feedback</>
-                  }
+                  <div className="w-11 h-11 rounded-full bg-brand-600" />
                 </button>
               </div>
-            )}
+              <button
+                onClick={closeCamera}
+                className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg"
+              >×</button>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <button onClick={openCamera} className="btn-secondary flex-1 py-5 gap-2 flex-col h-auto">
+                <Camera size={24} />
+                <span className="text-xs font-medium">Camera</span>
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-5 gap-2 flex-col h-auto">
+                <ImageIcon size={24} />
+                <span className="text-xs font-medium">Gallery</span>
+              </button>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+            </div>
+          )}
 
-            {/* Feedback sent confirmation */}
-            {feedbackState === 'sent' && (
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5 text-sm text-green-700">
-                <ThumbsUp size={15} className="flex-shrink-0" />
-                <span>Feedback saved — thank you! 🙏</span>
-              </div>
-            )}
+          {aiError && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600">
+              <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+              <span>{aiError}</span>
+            </div>
+          )}
 
-            <button onClick={reset} className="btn-secondary w-full gap-2">
-              <RefreshCw size={14} /> Retake / clear
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <hr className="flex-1 border-gray-200" />
+            <span className="text-xs text-gray-400">or enter manually</span>
+            <hr className="flex-1 border-gray-200" />
+          </div>
+
+          {/* Manual score + confirm */}
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={points}
+              onChange={e => setPoints(e.target.value)}
+              placeholder="0"
+              className="flex-1 text-4xl font-bold text-brand-700 text-center py-3 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
+            />
+            <button
+              onClick={() => { if (validScore) onConfirm(score, []) }}
+              disabled={!validScore}
+              className="flex-shrink-0 w-24 h-16 rounded-2xl bg-brand-600 text-white font-bold text-sm flex flex-col items-center justify-center gap-0.5 disabled:opacity-40 active:bg-brand-700 transition-colors"
+            >
+              <Check size={20} />
+              <span>Save</span>
             </button>
           </div>
-        )}
 
-        {/* Camera / gallery buttons */}
-        {!analyzing && !capturedImage && (
-          <div className="space-y-3">
-            {cameraOpen ? (
-              <div className="relative rounded-2xl overflow-hidden bg-black">
-                <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-56 object-cover" />
-                <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
-                  Spread cards face-up · good lighting
-                </p>
-                <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                  <button
-                    onClick={capturePhoto}
-                    className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform"
-                  >
-                    <div className="w-11 h-11 rounded-full bg-brand-600" />
-                  </button>
-                </div>
-                <button
-                  onClick={closeCamera}
-                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg"
-                >×</button>
-              </div>
-            ) : (
-              <div className="flex gap-3">
-                <button onClick={openCamera} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
-                  <Camera size={22} />
-                  <span className="text-xs">Camera</span>
-                </button>
-                <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
-                  <Camera size={22} />
-                  <span className="text-xs">Gallery</span>
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+          <div className="h-4" />
+        </div>
+      )}
+
+      {/* ── REVIEW PHASE ── */}
+      {phase === 'review' && (
+        <div className="flex-1 flex flex-col overflow-y-auto">
+
+          {/* STEP 1 — Image (saved automatically) */}
+          <div className="relative flex-shrink-0">
+            {capturedImage && (
+              <img src={capturedImage} alt="Captured" className="w-full max-h-52 object-cover" />
+            )}
+            <div className="absolute top-2 left-2 bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-green-400" />
+              <span className="text-white text-xs font-medium">Image saved</span>
+            </div>
+            <button
+              onClick={retake}
+              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center"
+            >
+              <RefreshCw size={14} />
+            </button>
+          </div>
+
+          <div className="px-5 py-4 space-y-4 flex-1">
+
+            {/* Analyzing spinner */}
+            {analyzing && (
+              <div className="flex flex-col items-center justify-center gap-3 py-8 text-brand-600 bg-brand-50 rounded-2xl">
+                <Loader size={26} className="animate-spin" />
+                <span className="text-sm font-medium">Detecting cards…</span>
               </div>
             )}
 
-            {aiError && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600">
-                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-                <span>{aiError}</span>
-              </div>
+            {/* STEP 2 — Edit score */}
+            {!analyzing && (
+              <>
+                {/* Detection breakdown */}
+                {detectedTokens.length > 0 && (
+                  <div className="bg-gray-50 rounded-2xl border border-gray-200 overflow-hidden">
+                    <div className="px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        AI detected
+                      </span>
+                      <span className="text-xs font-bold text-brand-700">{aiScore} pts</span>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {detectedTokens.map(t => (
+                        <div key={t.token} className="flex items-center justify-between px-4 py-2.5">
+                          <div className="flex items-center gap-3">
+                            <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-white border-2 border-gray-300 font-bold text-sm text-gray-800 shadow-sm">
+                              {t.token === 'JOKER' || t.token === 'JKR' ? '🃏' : t.token}
+                            </span>
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">{t.label}</p>
+                              <p className="text-xs text-gray-400">{t.count} card{t.count !== 1 ? 's' : ''} × {t.points} pts</p>
+                            </div>
+                          </div>
+                          <span className="text-sm font-bold text-brand-700">{t.points * t.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="px-4 py-2.5 bg-brand-50 border-t border-brand-100 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-brand-700">AI Total</span>
+                      <span className="text-sm font-bold text-brand-700">{aiScore} pts</span>
+                    </div>
+                  </div>
+                )}
+
+                {aiError && (
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm text-amber-700">
+                    <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                    <span>{aiError}</span>
+                  </div>
+                )}
+
+                {/* Score edit field */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    {detectedTokens.length > 0 ? '② Correct if needed' : '② Enter score'}
+                  </p>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={points}
+                    onChange={e => setPoints(e.target.value)}
+                    placeholder="0"
+                    className="w-full text-5xl font-bold text-brand-700 text-center py-4 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
+                    autoFocus
+                  />
+                  {validScore && aiScore !== null && score !== aiScore && (
+                    <p className="text-center text-xs text-amber-600 mt-1.5">
+                      ⚠ Changed from AI suggestion ({aiScore} pts) — correction will be saved
+                    </p>
+                  )}
+                  {validScore && (aiScore === null || score === aiScore) && (
+                    <p className="text-center text-sm text-gray-500 mt-1.5">{score} pts for {playerName}</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
-        )}
 
-        <div className="h-8" />
-      </div>
+          {/* STEP 3 — Save score button — pinned to bottom */}
+          {!analyzing && (
+            <div className="flex-shrink-0 px-5 pb-safe pb-5 pt-3 bg-white border-t border-gray-100">
+              <button
+                onClick={handleSave}
+                disabled={!validScore || saving}
+                className="btn-primary w-full py-4 text-base gap-2 disabled:opacity-40"
+              >
+                {saving
+                  ? <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+                  : <><Check size={20} /> Save score for {playerName}</>
+                }
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
