@@ -12,6 +12,7 @@ import {
   orderBy,
   limit,
   Timestamp,
+  serverTimestamp,
 } from './config'
 import type { Game, Round, Player, AppUser } from '../types'
 
@@ -214,6 +215,27 @@ export async function updateRound(
   await updateDoc(gameRef, {
     totalScores: newTotals,
     eliminatedPlayers: newEliminated,
+  })
+}
+
+// ── Scan feedback (training data) ─────────────────────────────────────────────
+
+export interface ScanFeedbackPayload {
+  imageBase64: string               // compressed jpeg base64 (no data: prefix)
+  detectedTokens: { token: string; points: number; count: number }[]
+  aiScore: number
+  correctedScore: number
+  playerName: string
+  gameId: string | null
+}
+
+export async function saveScanFeedback(payload: ScanFeedbackPayload): Promise<void> {
+  const uid = auth.currentUser?.uid ?? 'anonymous'
+  const ref = doc(collection(db, 'scanFeedback'))
+  await setDoc(ref, {
+    ...payload,
+    uid,
+    createdAt: serverTimestamp(),
   })
 }
 

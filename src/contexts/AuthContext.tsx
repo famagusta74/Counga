@@ -5,6 +5,9 @@ import {
   auth,
   googleProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  linkWithRedirect,
   signInAnonymously,
   signOut,
 } from '../firebase/config'
@@ -22,6 +25,11 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+/** Returns true on iOS or Android — these browsers block popups */
+function isMobileBrowser(): boolean {
+  return /iphone|ipad|ipod|android/i.test(navigator.userAgent)
+}
+
 function firebaseUserToAppUser(user: User, isGuest: boolean): AppUser {
   return {
     uid: user.uid,
@@ -37,10 +45,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // On mobile, after a redirect sign-in we land back here — pick up the result
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          const appUser = firebaseUserToAppUser(result.user, false)
+          setCurrentUser(appUser)
+          await upsertUser(appUser)
+          sessionStorage.removeItem('guestName')
+        }
+      })
+      .catch((err) => {
+        // Redirect result errors are non-fatal; log and continue
+        console.warn('getRedirectResult error:', err)
+      })
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         const isGuest = user.isAnonymous
-        const appUser = firebaseUserToAppUser(user, isGuest)
+        // Restore guest display name from session if needed
+        const storedName = sessionStorage.getItem('guestName')
+        const appUser: AppUser = {
+          uid: user.uid,
+          displayName: isGuest
+            ? (storedName ?? user.displayName ?? 'Guest')
+            : (user.displayName ?? user.email ?? 'Unknown'),
+          email: user.email,
+          isGuest,
+          photoURL: user.photoURL,
+        }
         setCurrentUser(appUser)
       } else {
         setCurrentUser(null)
@@ -51,6 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signInWithGoogle = async () => {
+    if (isMobileBrowser()) {
+      // Redirect flow — page will reload; result picked up in useEffect above
+      await signInWithRedirect(auth, googleProvider)
+      return
+    }
     const result = await signInWithPopup(auth, googleProvider)
     const appUser = firebaseUserToAppUser(result.user, false)
     setCurrentUser(appUser)
@@ -72,7 +110,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const upgradeGuestToGoogle = async () => {
     if (!auth.currentUser) return
-    // Link the anonymous account to a Google credential
+    if (isMobileBrowser()) {
+      // Redirect flow — result picked up on return via getRedirectResult
+      await linkWithRedirect(auth.currentUser, googleProvider)
+      return
+    }
     const result = await linkWithPopup(auth.currentUser, googleProvider)
     const appUser = firebaseUserToAppUser(result.user, false)
     setCurrentUser(appUser)

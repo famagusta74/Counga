@@ -1,0 +1,190 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Firebase Console Navigation Guide</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;font-size:14px;line-height:1.6;color:#1f2328;background:#fff;padding:28px 20px 48px}
+.wrap{max-width:720px;margin:0 auto}
+h1{font-size:20px;font-weight:700;margin-bottom:4px}
+.sub{color:#57606a;font-size:13px;margin-bottom:32px}
+.section{margin-bottom:36px}
+.section-title{font-size:16px;font-weight:700;padding:10px 14px;border-radius:10px 10px 0 0;color:#fff;display:flex;align-items:center;gap:8px}
+.auth-title{background:#4f46e5}
+.firestore-title{background:#0f766e}
+.steps{border:1px solid #e5e7eb;border-top:none;border-radius:0 0 10px 10px;overflow:hidden}
+.step{display:flex;gap:0;border-bottom:1px solid #f0f0f0}
+.step:last-child{border-bottom:none}
+.step-num{flex-shrink:0;width:40px;background:#f7f8fa;display:flex;align-items:flex-start;justify-content:center;padding-top:14px;font-weight:700;font-size:13px;color:#9ca3af;border-right:1px solid #f0f0f0}
+.step-body{padding:12px 16px;flex:1}
+.step-body p{color:#374151;margin-bottom:6px}
+.step-body p:last-child{margin-bottom:0}
+.click{display:inline-block;background:#1f2328;color:#fff;border-radius:5px;padding:2px 9px;font-size:12px;font-weight:600;margin:0 2px}
+.nav{display:inline-flex;align-items:center;gap:4px;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:12px;font-family:"SF Mono","Fira Code",monospace}
+.arrow{color:#9ca3af;font-size:11px}
+.img-sim{background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin:8px 0;font-size:12px;color:#57606a}
+.img-sim .row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f0}
+.img-sim .row:last-child{border-bottom:none}
+.img-sim .icon{width:20px;height:20px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700}
+.img-sim .label{flex:1;font-weight:500;color:#1f2328}
+.img-sim .action{color:#3b82d4;font-size:11px;font-weight:600}
+.toggle-on{display:inline-block;width:36px;height:20px;background:#3b82d4;border-radius:10px;position:relative;vertical-align:middle;margin:0 4px}
+.toggle-on::after{content:'';position:absolute;right:3px;top:3px;width:14px;height:14px;background:#fff;border-radius:50%}
+.toggle-off{display:inline-block;width:36px;height:20px;background:#d1d5db;border-radius:10px;position:relative;vertical-align:middle;margin:0 4px}
+.toggle-off::after{content:'';position:absolute;left:3px;top:3px;width:14px;height:14px;background:#fff;border-radius:50%}
+.warn{background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;font-size:13px;color:#92400e;margin:8px 0}
+.ok{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;font-size:13px;color:#166534;margin:8px 0}
+.url{display:block;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:6px;padding:6px 12px;font-family:"SF Mono","Fira Code",monospace;font-size:11px;color:#3b82d4;word-break:break-all;margin:6px 0}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;text-align:center;font-size:12px;color:#9ca3af}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔥 Firebase Console — Step by Step</h1>
+  <p class="sub">Exact navigation for enabling Auth and Firestore in your existing project</p>
+
+  
+  <div class="section">
+    <div class="section-title auth-title">🔐 Part 1 — Enable Authentication</div>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <p>Go to the Firebase Console homepage:</p>
+          <a class="url" href="https://console.firebase.google.com">https://console.firebase.google.com</a>
+          <p>You will see a list of your projects. Click on <span class="click">football-prediction-game</span></p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <p>In the <strong>left sidebar</strong>, look for the <strong>Build</strong> section and click <span class="click">Authentication</span></p>
+          <div class="img-sim">
+            <div class="row"><div class="icon" style="background:#6366f1">🏠</div><div class="label">Project Overview</div></div>
+            <div class="row"><div class="icon" style="background:#374151">▸</div><div class="label"><strong>Build</strong></div></div>
+            <div class="row"><div class="icon" style="background:#4f46e5">🔐</div><div class="label" style="padding-left:12px"><strong>Authentication</strong> ← click this</div><div class="action">→</div></div>
+            <div class="row"><div class="icon" style="background:#0f766e">🗄</div><div class="label" style="padding-left:12px">Firestore Database</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <p>If you see a <span class="click">Get started</span> button, click it. Otherwise you're already inside Authentication.</p>
+          <p>Click the <span class="click">Sign-in method</span> tab at the top.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <p>You will see a list of providers. Click <span class="click">Google</span></p>
+          <div class="img-sim">
+            <div class="row"><div class="icon" style="background:#ea4335">G</div><div class="label">Google</div><div class="action">click →</div></div>
+            <div class="row"><div class="icon" style="background:#1877f2">f</div><div class="label">Facebook</div><div class="action">disabled</div></div>
+          </div>
+          <p>A panel opens. Click the toggle to <strong>Enable</strong> it: <span class="toggle-off"></span> → <span class="toggle-on"></span></p>
+          <p>Set <strong>Project support email</strong> to your Gmail address. Click <span class="click">Save</span></p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <p>Back in the Sign-in method list, click <span class="click">Anonymous</span></p>
+          <p>Enable the toggle <span class="toggle-off"></span> → <span class="toggle-on"></span> and click <span class="click">Save</span></p>
+          <div class="ok">✅ Both Google and Anonymous should now show a green <strong>Enabled</strong> badge.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <p>Click the <span class="click">Settings</span> tab (next to Sign-in method at the top).</p>
+          <p>Scroll down to <strong>Authorized domains</strong>. You will see <code>localhost</code> already there.</p>
+          <p>Click <span class="click">Add domain</span> and type exactly:</p>
+          <span class="url">famagusta74.github.io</span>
+          <p>Click <span class="click">Add</span></p>
+          <div class="ok">✅ This allows Google sign-in to work from your live app URL.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  
+  <div class="section">
+    <div class="section-title firestore-title">🗄 Part 2 — Enable Firestore Database</div>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <p>In the same left sidebar under <strong>Build</strong>, click <span class="click">Firestore Database</span></p>
+          <div class="warn">⚠️ This is <strong>Firestore</strong>, NOT "Realtime Database". Counga uses Firestore. Your football game uses Realtime Database — they are separate and won't interfere.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <p>Click <span class="click">Create database</span></p>
+          <p>A dialog appears. Choose <strong>Start in production mode</strong> and click <span class="click">Next</span></p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <p>Choose the location. Select <strong>europe-west1 (Belgium)</strong> — same region as your existing Realtime Database.</p>
+          <p>Click <span class="click">Enable</span></p>
+          <p>Wait ~30 seconds for it to provision.</p>
+          <div class="ok">✅ Firestore is now active.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <p>Click the <span class="click">Rules</span> tab at the top of the Firestore page.</p>
+          <p>Delete everything in the editor and paste this:</p>
+          <div class="img-sim" style="font-family:'SF Mono','Fira Code',monospace;font-size:11px;line-height:1.8;color:#1f2328;white-space:pre">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null
+                         &amp;&amp; request.auth.uid == uid;
+    }
+    match /games/{gameId} {
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      match /rounds/{roundId} {
+        allow read, create: if request.auth != null;
+      }
+    }
+  }
+}</div>
+          <p style="margin-top:8px">Click <span class="click">Publish</span></p>
+          <div class="ok">✅ Security rules are now live.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  
+  <div class="ok" style="font-size:14px;padding:16px">
+    🎉 <strong>All done!</strong> Your Counga app is now fully connected to Firebase.<br />
+    Open <strong>https://famagusta74.github.io/Counga/</strong> and sign in with Google or as a guest to start playing!
+  </div>
+
+</div>
+<footer>Made with IBM Bob</footer>
+</body>
+</html>

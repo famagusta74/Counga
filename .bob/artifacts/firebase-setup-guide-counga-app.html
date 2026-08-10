@@ -1,0 +1,282 @@
+
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebase Setup Guide — Counga</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1f2328;
+    background: #ffffff;
+    padding: 32px 20px 48px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { color: #57606a; font-size: 13px; margin-bottom: 32px; }
+  .step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 28px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .step:last-of-type { border-bottom: none; }
+  .num {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #3b82d4;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .num.done { background: #16a34a; }
+  .body { flex: 1; min-width: 0; }
+  .body h2 { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .body p { color: #374151; margin-bottom: 8px; }
+  .body ul { padding-left: 18px; color: #374151; margin-bottom: 8px; }
+  .body li { margin-bottom: 4px; }
+  .url {
+    display: inline-block;
+    background: #f7f8fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    color: #3b82d4;
+    word-break: break-all;
+    margin: 4px 0;
+  }
+  .box {
+    background: #f7f8fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 8px 0;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    color: #1f2328;
+  }
+  .box .key { color: #7c5cd8; }
+  .box .val { color: #0f766e; }
+  .warn {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #92400e;
+    margin: 8px 0;
+  }
+  .ok {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #166534;
+    margin: 8px 0;
+  }
+  .tag {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #3730a3;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .tag.green { background: #dcfce7; color: #166534; }
+  .tag.red { background: #fee2e2; color: #991b1b; }
+  .arrow { color: #9ca3af; margin: 0 4px; }
+  footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>🔥 Firebase Setup Guide</h1>
+  <p class="subtitle">Activate Firebase for the Counga score keeper app · Uses your existing <strong>football-prediction-game-ca155</strong> project</p>
+
+  
+  <div class="step">
+    <div class="num done">✓</div>
+    <div class="body">
+      <h2>Step 1 — Firebase project already exists</h2>
+      <p>You already have the <strong>football-prediction-game-ca155</strong> Firebase project. No need to create a new one.</p>
+      <div class="ok">✅ Project ID: <strong>football-prediction-game-ca155</strong> — ready to use.</div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <h2>Step 2 — Enable Google Authentication</h2>
+      <p>Open the Firebase Console and navigate to your project:</p>
+      <div class="url">https://console.firebase.google.com/project/football-prediction-game-ca155/authentication</div>
+      <ul>
+        <li>Click <strong>Get started</strong> if Authentication isn't enabled yet</li>
+        <li>Go to the <strong>Sign-in method</strong> tab</li>
+        <li>Click <strong>Google</strong> <span class="arrow">→</span> toggle <strong>Enable</strong> <span class="tag green">ON</span></li>
+        <li>Set a support email (your Gmail address)</li>
+        <li>Click <strong>Save</strong></li>
+      </ul>
+      <div class="warn">⚠️ Also enable <strong>Anonymous</strong> sign-in (for guest players):<br />Sign-in method → Anonymous → Enable → Save</div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">3</div>
+    <div class="body">
+      <h2>Step 3 — Add Authorized Domain</h2>
+      <p>Still in Authentication, click the <strong>Settings</strong> tab:</p>
+      <div class="url">https://console.firebase.google.com/project/football-prediction-game-ca155/authentication/settings</div>
+      <ul>
+        <li>Scroll to <strong>Authorized domains</strong></li>
+        <li>Click <strong>Add domain</strong></li>
+        <li>Enter: <code style="background:#f7f8fa;padding:2px 6px;border-radius:4px">famagusta74.github.io</code></li>
+        <li>Click <strong>Add</strong></li>
+      </ul>
+      <div class="ok">✅ This allows the Google sign-in popup to work from your GitHub Pages URL.</div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">4</div>
+    <div class="body">
+      <h2>Step 4 — Enable Firestore Database</h2>
+      <div class="url">https://console.firebase.google.com/project/football-prediction-game-ca155/firestore</div>
+      <ul>
+        <li>Click <strong>Create database</strong></li>
+        <li>Choose <strong>Start in production mode</strong></li>
+        <li>Select region: <strong>europe-west1</strong> (matches your existing Realtime DB)</li>
+        <li>Click <strong>Enable</strong></li>
+      </ul>
+      <div class="warn">⚠️ Counga uses <strong>Firestore</strong> (not Realtime Database). Your football game data stays separate — Counga data goes under its own <code>games/</code> collection.</div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">5</div>
+    <div class="body">
+      <h2>Step 5 — Deploy Firestore Security Rules</h2>
+      <p>In Firestore → <strong>Rules</strong> tab, paste these rules and click <strong>Publish</strong>:</p>
+      <div class="box">
+<span class="key">rules_version</span> = <span class="val">'2'</span>;<br />
+service cloud.firestore {<br />
+  match /databases/{database}/documents {<br />
+    match /users/{uid} {<br />
+      allow read, write: if request.auth != null &amp;&amp; request.auth.uid == uid;<br />
+    }<br />
+    match /games/{gameId} {<br />
+      allow read: if request.auth != null;<br />
+      allow create: if request.auth != null;<br />
+      allow update: if request.auth != null;<br />
+      match /rounds/{roundId} {<br />
+        allow read, create: if request.auth != null;<br />
+      }<br />
+    }<br />
+  }<br />
+}
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">6</div>
+    <div class="body">
+      <h2>Step 6 — Add GitHub Secrets</h2>
+      <p>Go to your Counga repo on GitHub:</p>
+      <div class="url">https://github.com/famagusta74/Counga/settings/secrets/actions</div>
+      <p>Click <strong>New repository secret</strong> and add each of these 6 secrets:</p>
+      <div class="box">
+        <span class="key">VITE_FIREBASE_API_KEY</span><br />
+        <span class="val">YOUR_FIREBASE_API_KEY</span><br /><br />
+        <span class="key">VITE_FIREBASE_AUTH_DOMAIN</span><br />
+        <span class="val">football-prediction-game-ca155.firebaseapp.com</span><br /><br />
+        <span class="key">VITE_FIREBASE_PROJECT_ID</span><br />
+        <span class="val">football-prediction-game-ca155</span><br /><br />
+        <span class="key">VITE_FIREBASE_STORAGE_BUCKET</span><br />
+        <span class="val">football-prediction-game-ca155.firebasestorage.app</span><br /><br />
+        <span class="key">VITE_FIREBASE_MESSAGING_SENDER_ID</span><br />
+        <span class="val">266847662424</span><br /><br />
+        <span class="key">VITE_FIREBASE_APP_ID</span><br />
+        <span class="val">1:266847662424:web:fc24bb439d3015e02cf52d</span>
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">7</div>
+    <div class="body">
+      <h2>Step 7 — Enable GitHub Pages</h2>
+      <div class="url">https://github.com/famagusta74/Counga/settings/pages</div>
+      <ul>
+        <li>Under <strong>Source</strong>, select <strong>Deploy from a branch</strong></li>
+        <li>Branch: <strong>gh-pages</strong>  /  folder: <strong>/ (root)</strong></li>
+        <li>Click <strong>Save</strong></li>
+      </ul>
+      <div class="warn">⚠️ The <code>gh-pages</code> branch is created automatically by GitHub Actions on the first successful build. If it doesn't appear yet, run the workflow first (Step 8).</div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">8</div>
+    <div class="body">
+      <h2>Step 8 — Trigger the Deployment</h2>
+      <div class="url">https://github.com/famagusta74/Counga/actions</div>
+      <ul>
+        <li>Click <strong>Deploy to GitHub Pages</strong> workflow</li>
+        <li>Click <strong>Run workflow</strong> → <strong>Run workflow</strong></li>
+        <li>Wait ~2 minutes for the build to complete ✅</li>
+      </ul>
+      <div class="ok">🚀 Once green, your app is live at:<br /><strong>https://famagusta74.github.io/Counga/</strong></div>
+    </div>
+  </div>
+
+  
+  <div class="step">
+    <div class="num">9</div>
+    <div class="body">
+      <h2>Step 9 — Test on your phone</h2>
+      <ul>
+        <li>Open <strong>https://famagusta74.github.io/Counga/</strong> on your phone</li>
+        <li>Sign in with Google or play as a guest</li>
+        <li>On iOS: tap <strong>Share → Add to Home Screen</strong> to install as an app</li>
+        <li>On Android: tap the browser menu → <strong>Install app</strong></li>
+      </ul>
+      <div class="ok">✅ The app works offline after first load thanks to the PWA service worker.</div>
+    </div>
+  </div>
+
+</div>
+<footer>Made with IBM Bob</footer>
+</body>
+</html>

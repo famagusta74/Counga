@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut } from 'firebase/auth'
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, linkWithRedirect, signInAnonymously, signOut } from 'firebase/auth'
 import {
   getFirestore,
   collection,
@@ -34,6 +34,9 @@ export const googleProvider = new GoogleAuthProvider()
 export {
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  linkWithRedirect,
   signInAnonymously,
   signOut,
   collection,
