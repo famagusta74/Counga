@@ -38,6 +38,8 @@ export default function GamePage() {
   const [showWinnerPrompt, setShowWinnerPrompt]     = useState(false)
   const [suggestedWinnerUid, setSuggestedWinnerUid] = useState<string | null>(null)
   const [roundError, setRoundError]                 = useState('')
+  // Scores from the round that just finished — used in the post-round standings
+  const [lastRoundScores, setLastRoundScores]       = useState<Record<string, number>>({})
 
   // Add player mid-game
   const [showAddPlayer, setShowAddPlayer]   = useState(false)
@@ -139,18 +141,24 @@ export default function GamePage() {
   const submitRound = async (scores: Record<string, number>, winnerUid: string | null = roundWinnerUid) => {
     if (!gameId || !game) return
 
-    // ── Validation: every round must have exactly one winner (0 pts) ──────────
-    const hasWinner = Object.values(scores).some(s => s === 0)
-    if (!hasWinner) {
+    // ── Validation: exactly one winner (0 pts) per round ──────────────────────
+    const zeroCount = Object.values(scores).filter(s => s === 0).length
+    if (zeroCount === 0) {
       setRoundError(
-        'Every round must have a winner with 0 points. ' +
-        'Go back and mark which player won this round (⭐ button), or enter 0 for them.'
+        'Every round must have one winner with 0 points. ' +
+        'Use the ⭐ button to mark the winner, or manually enter 0 for them.'
       )
-      // Reset picker so user can fix it
-      setPickerState(null)
-      setAddingRound(false)
-      setRoundWinnerUid(null)
-      setSuggestedWinnerUid(null)
+      setPickerState(null); setAddingRound(false)
+      setRoundWinnerUid(null); setSuggestedWinnerUid(null)
+      return
+    }
+    if (zeroCount > 1) {
+      setRoundError(
+        `${zeroCount} players have 0 points this round — only one winner is allowed. ` +
+        'Please re-enter the round and correct the scores.'
+      )
+      setPickerState(null); setAddingRound(false)
+      setRoundWinnerUid(null); setSuggestedWinnerUid(null)
       return
     }
     setRoundError('')
@@ -170,6 +178,7 @@ export default function GamePage() {
         uid => !prevEliminated.includes(uid)
       )
       setNewlyEliminated(justEliminated)
+      setLastRoundScores(scores)
 
       if (updated.status === 'finished') {
         setPostRound('idle')
@@ -190,6 +199,7 @@ export default function GamePage() {
   const handlePostRoundContinue = () => {
     setPostRound('idle')
     setNewlyEliminated([])
+    setLastRoundScores({})
     setShowAddPlayer(false)
     setNewPlayerName('')
     setAddPlayerError('')
@@ -460,34 +470,79 @@ export default function GamePage() {
 
       {/* ── Post-round dialog ── */}
       {postRound === 'asking' && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
-            <div className="bg-brand-950 text-white px-5 py-4">
-              <h3 className="font-bold text-base">Round {rounds.length} done!</h3>
-              <p className="text-xs text-brand-300 mt-0.5">What would you like to do next?</p>
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+
+            {/* Header */}
+            <div className="bg-brand-950 text-white px-5 py-4 flex-shrink-0">
+              <h3 className="font-bold text-base">Round {rounds.length} complete</h3>
+              <p className="text-xs text-brand-300 mt-0.5">Standings after this round</p>
             </div>
 
-            {/* Newly eliminated notice */}
-            {newlyEliminated.length > 0 && (
-              <div className="bg-red-50 border-b border-red-200 px-5 py-3">
-                <p className="text-sm font-semibold text-red-700">
-                  {newlyEliminated.length === 1 ? 'Player eliminated:' : 'Players eliminated:'}
-                </p>
-                {newlyEliminated.map(uid => {
-                  const p = game.players.find(pl => pl.uid === uid)
-                  return (
-                    <p key={uid} className="text-sm text-red-600 mt-0.5">
-                      ❌ {p?.displayName} reached {game.totalScores[uid]} pts (target: {game.targetScore})
-                    </p>
-                  )
-                })}
-                {activePlayers.length > 0 && (
-                  <p className="text-xs text-red-500 mt-1">
-                    {activePlayers.length} player{activePlayers.length > 1 ? 's' : ''} still active.
-                  </p>
-                )}
+            {/* ── Standings ── */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="divide-y divide-gray-100">
+                {[...game.players]
+                  .sort((a, b) => (game.totalScores[a.uid] ?? 0) - (game.totalScores[b.uid] ?? 0))
+                  .map((p, idx) => {
+                    const total     = game.totalScores[p.uid] ?? 0
+                    const roundPts  = lastRoundScores[p.uid] ?? null
+                    const isWinner  = roundPts === 0
+                    const isElim    = (game.eliminatedPlayers ?? []).includes(p.uid)
+                    const justElim  = newlyEliminated.includes(p.uid)
+                    const medals    = ['🥇','🥈','🥉']
+                    const rank      = medals[idx] ?? `${idx + 1}.`
+                    return (
+                      <div
+                        key={p.uid}
+                        className={`flex items-center gap-3 px-5 py-3 ${
+                          isWinner ? 'bg-amber-50' : justElim ? 'bg-red-50' : ''
+                        }`}
+                      >
+                        {/* Rank */}
+                        <span className="text-lg w-7 text-center flex-shrink-0">{rank}</span>
+
+                        {/* Name */}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold truncate ${isElim ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                            {p.displayName}
+                          </p>
+                          {justElim && (
+                            <p className="text-xs text-red-500 font-medium">Eliminated this round</p>
+                          )}
+                        </div>
+
+                        {/* This round's score */}
+                        {roundPts !== null && (
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                            isWinner
+                              ? 'bg-amber-200 text-amber-800'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {isWinner ? '⭐ +0' : `+${roundPts}`}
+                          </span>
+                        )}
+
+                        {/* Cumulative total */}
+                        <span className={`text-base font-bold w-14 text-right flex-shrink-0 ${
+                          total >= game.targetScore ? 'text-red-500' : 'text-gray-900'
+                        }`}>
+                          {total}
+                        </span>
+                      </div>
+                    )
+                  })}
               </div>
-            )}
+
+              {/* Eliminated notice if any */}
+              {newlyEliminated.length > 0 && (
+                <div className="bg-red-50 border-t border-red-100 px-5 py-2.5">
+                  <p className="text-xs text-red-600 font-medium">
+                    ❌ {newlyEliminated.map(uid => game.players.find(p => p.uid === uid)?.displayName).join(', ')} reached {game.targetScore} pts and {newlyEliminated.length === 1 ? 'is' : 'are'} eliminated.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* ── Add player panel (toggled) ── */}
             {showAddPlayer ? (
