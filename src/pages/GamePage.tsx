@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGame, getRounds, addRound, finishGameManually, updateRound } from '../firebase/db'
+import { getGame, getRounds, addRound, finishGameManually, updateRound, addPlayerToGame } from '../firebase/db'
 import type { Game, Round } from '../types'
 import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
 import { useAuth } from '../contexts/AuthContext'
-import { Trophy, Plus, Flag, UserCheck, Star } from 'lucide-react'
+import { Trophy, Plus, Flag, UserCheck, Star, UserPlus } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number   // index into activePlayers array
@@ -37,6 +37,12 @@ export default function GamePage() {
   const [roundWinnerUid, setRoundWinnerUid]         = useState<string | null>(null)
   const [showWinnerPrompt, setShowWinnerPrompt]     = useState(false)
   const [suggestedWinnerUid, setSuggestedWinnerUid] = useState<string | null>(null)
+
+  // Add player mid-game
+  const [showAddPlayer, setShowAddPlayer]   = useState(false)
+  const [newPlayerName, setNewPlayerName]   = useState('')
+  const [addingPlayer, setAddingPlayer]     = useState(false)
+  const [addPlayerError, setAddPlayerError] = useState('')
 
   const load = useCallback(async () => {
     if (!gameId) return
@@ -153,6 +159,39 @@ export default function GamePage() {
   const handlePostRoundContinue = () => {
     setPostRound('idle')
     setNewlyEliminated([])
+    setShowAddPlayer(false)
+    setNewPlayerName('')
+    setAddPlayerError('')
+  }
+
+  const handleAddPlayer = async () => {
+    const name = newPlayerName.trim()
+    if (!name) { setAddPlayerError('Enter a name.'); return }
+    if (!game || !gameId) return
+    if (game.players.some(p => p.displayName.toLowerCase() === name.toLowerCase())) {
+      setAddPlayerError('A player with that name is already in the game.')
+      return
+    }
+    setAddingPlayer(true)
+    setAddPlayerError('')
+    try {
+      // Starting score = highest current total among all players
+      const highestScore = Math.max(0, ...Object.values(game.totalScores))
+      const newPlayer = {
+        uid: `guest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        displayName: name,
+        isGuest: true,
+      }
+      await addPlayerToGame(gameId, newPlayer, highestScore)
+      await load()
+      setShowAddPlayer(false)
+      setNewPlayerName('')
+    } catch (e) {
+      console.error(e)
+      setAddPlayerError('Failed to add player. Try again.')
+    } finally {
+      setAddingPlayer(false)
+    }
   }
 
   const handlePostRoundEnd = async () => {
@@ -402,24 +441,71 @@ export default function GamePage() {
               </div>
             )}
 
-            <div className="px-5 py-4 space-y-2">
-              <button
-                onClick={handlePostRoundContinue}
-                className="btn-primary w-full py-3 gap-2"
-              >
-                <Plus size={16} /> Continue — play Round {rounds.length + 1}
-              </button>
-              <button
-                onClick={handlePostRoundEnd}
-                disabled={endingGame}
-                className="btn-secondary w-full py-2.5 gap-2"
-              >
-                {endingGame
-                  ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500" />
-                  : <><Flag size={15} /> End game now</>
-                }
-              </button>
-            </div>
+            {/* ── Add player panel (toggled) ── */}
+            {showAddPlayer ? (
+              <div className="px-5 py-4 space-y-3">
+                <p className="text-sm font-semibold text-gray-800">Add a new player</p>
+                <p className="text-xs text-gray-500">
+                  They will start with <strong>{Math.max(0, ...Object.values(game.totalScores))} pts</strong> — the highest score in the game.
+                </p>
+                <input
+                  type="text"
+                  value={newPlayerName}
+                  onChange={e => { setNewPlayerName(e.target.value); setAddPlayerError('') }}
+                  onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
+                  placeholder="Player name…"
+                  className="input"
+                  maxLength={30}
+                  autoFocus
+                />
+                {addPlayerError && (
+                  <p className="text-xs text-red-600">{addPlayerError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setShowAddPlayer(false); setNewPlayerName(''); setAddPlayerError('') }}
+                    className="btn-secondary flex-1"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddPlayer}
+                    disabled={addingPlayer || !newPlayerName.trim()}
+                    className="btn-primary flex-1 gap-2"
+                  >
+                    {addingPlayer
+                      ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                      : <><UserPlus size={15} /> Add</>
+                    }
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="px-5 py-4 space-y-2">
+                <button
+                  onClick={handlePostRoundContinue}
+                  className="btn-primary w-full py-3 gap-2"
+                >
+                  <Plus size={16} /> Continue — play Round {rounds.length + 1}
+                </button>
+                <button
+                  onClick={() => setShowAddPlayer(true)}
+                  className="btn-secondary w-full py-2.5 gap-2"
+                >
+                  <UserPlus size={15} /> Add a player to the game
+                </button>
+                <button
+                  onClick={handlePostRoundEnd}
+                  disabled={endingGame}
+                  className="btn-ghost w-full py-2 gap-2 text-gray-500"
+                >
+                  {endingGame
+                    ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500" />
+                    : <><Flag size={15} /> End game now</>
+                  }
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

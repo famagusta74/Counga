@@ -134,6 +134,26 @@ export async function addRound(
   })
 }
 
+/** Add a new player mid-game at the highest current total score */
+export async function addPlayerToGame(
+  gameId: string,
+  player: Player,
+  startingScore: number,
+): Promise<void> {
+  const gameRef  = doc(db, 'games', gameId)
+  const gameSnap = await getDoc(gameRef)
+  if (!gameSnap.exists()) return
+  const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
+
+  const updatedPlayers    = [...game.players, player]
+  const updatedTotals     = { ...game.totalScores, [player.uid]: startingScore }
+
+  await updateDoc(gameRef, {
+    players:     updatedPlayers,
+    totalScores: updatedTotals,
+  })
+}
+
 export async function getRounds(gameId: string): Promise<Round[]> {
   const snap = await getDocs(
     query(collection(db, 'games', gameId, 'rounds'), orderBy('roundNumber'))
