@@ -74,7 +74,9 @@ export default function GamePage() {
   const handleCardConfirm = (score: number, _cards: { rank: CardRank; count: number }[]) => {
     if (!game || !pickerState) return
     const player = activePlayers[pickerState.playerIndex]
-    const newScores = { ...pickerState.scores, [player.uid]: score }
+    // If this player was declared round winner, force score to 0
+    const effectiveScore = roundWinnerUid === player.uid ? 0 : score
+    const newScores = { ...pickerState.scores, [player.uid]: effectiveScore }
     const nextIndex = pickerState.playerIndex + 1
 
     if (nextIndex < activePlayers.length) {
@@ -114,6 +116,14 @@ export default function GamePage() {
   const handleDismissWinnerPrompt = () => {
     setShowWinnerPrompt(false)
     setSuggestedWinnerUid(null)
+  }
+
+  // User taps "Won this round" on any CardPicker screen mid-round
+  const handlePickerWinner = (playerUid: string) => {
+    setRoundWinnerUid(playerUid)
+    // Continue collecting remaining players — this player's score will be 0 when round submits
+    // We don't close the round here; the caller proceeds to next player normally
+    // (GamePage will pass 0 for this player when submitRound is called at the end)
   }
 
   const handlePickerCancel = () => {
@@ -533,7 +543,9 @@ export default function GamePage() {
         <CardPicker
           key={`${pickerState.playerIndex}-${activePlayers[pickerState.playerIndex]?.uid}`}
           playerName={activePlayers[pickerState.playerIndex]?.displayName ?? ''}
+          roundWinnerUid={roundWinnerUid}
           onConfirm={handleCardConfirm}
+          onWinner={() => handlePickerWinner(activePlayers[pickerState.playerIndex]?.uid ?? '')}
           onCancel={handlePickerCancel}
         />
       )}
