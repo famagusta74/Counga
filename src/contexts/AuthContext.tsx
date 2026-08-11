@@ -42,10 +42,19 @@ function firebaseUserToAppUser(user: User, isGuest: boolean): AppUser {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null)
+  // Start as true — stays true until BOTH getRedirectResult AND onAuthStateChanged resolve
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // On mobile, after a redirect sign-in we land back here — pick up the result
+    let authStateResolved = false
+    let redirectResolved  = false
+
+    // Mark loading done only when both have resolved
+    const trySetLoaded = () => {
+      if (authStateResolved && redirectResolved) setLoading(false)
+    }
+
+    // 1. Pick up any pending redirect result (mobile Google sign-in return)
     getRedirectResult(auth)
       .then(async (result) => {
         if (result?.user) {
@@ -56,14 +65,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch((err) => {
-        // Redirect result errors are non-fatal; log and continue
         console.warn('getRedirectResult error:', err)
       })
+      .finally(() => {
+        redirectResolved = true
+        trySetLoaded()
+      })
 
+    // 2. Subscribe to auth state changes
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         const isGuest = user.isAnonymous
-        // Restore guest display name from session if needed
         const storedName = sessionStorage.getItem('guestName')
         const appUser: AppUser = {
           uid: user.uid,
@@ -78,16 +90,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setCurrentUser(null)
       }
-      setLoading(false)
+      authStateResolved = true
+      trySetLoaded()
     })
+
     return unsubscribe
   }, [])
 
   const signInWithGoogle = async () => {
     if (isMobileBrowser()) {
-      // Redirect flow — page will reload; result picked up in useEffect above
+      // Redirect flow — page navigates to Google then back.
+      // getRedirectResult() in useEffect above picks up the result on return.
       await signInWithRedirect(auth, googleProvider)
-      return
+      return   // page is leaving; nothing after this runs
     }
     const result = await signInWithPopup(auth, googleProvider)
     const appUser = firebaseUserToAppUser(result.user, false)
@@ -104,14 +119,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isGuest: true,
     }
     setCurrentUser(appUser)
-    // Store guest name in session so it survives navigations
     sessionStorage.setItem('guestName', appUser.displayName)
   }
 
   const upgradeGuestToGoogle = async () => {
     if (!auth.currentUser) return
     if (isMobileBrowser()) {
-      // Redirect flow — result picked up on return via getRedirectResult
       await linkWithRedirect(auth.currentUser, googleProvider)
       return
     }

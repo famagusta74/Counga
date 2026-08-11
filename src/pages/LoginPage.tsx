@@ -1,20 +1,33 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { LogIn, User, Chrome } from 'lucide-react'
 
 export default function LoginPage() {
-  const { currentUser, signInWithGoogle, signInAsGuest } = useAuth()
+  const { currentUser, loading: authLoading, signInWithGoogle, signInAsGuest } = useAuth()
   const navigate = useNavigate()
 
   const [guestName, setGuestName] = useState('')
   const [loading, setLoading] = useState<'google' | 'guest' | null>(null)
   const [error, setError] = useState('')
 
-  // Already logged in — redirect home
-  if (currentUser) {
-    navigate('/', { replace: true })
-    return null
+  // Redirect once authenticated — useEffect so it never runs during render
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/', { replace: true })
+    }
+  }, [currentUser, navigate])
+
+  // While Firebase is resolving a pending redirect result, show a full-screen spinner
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-brand-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white" />
+          <p className="text-brand-300 text-sm">Signing you in…</p>
+        </div>
+      </div>
+    )
   }
 
   const handleGoogle = async () => {
@@ -22,10 +35,14 @@ export default function LoginPage() {
     setLoading('google')
     try {
       await signInWithGoogle()
+      // On desktop the popup resolves here → navigate
+      // On mobile signInWithRedirect() redirects the page — navigate never reached
       navigate('/', { replace: true })
-    } catch (e: any) {
+    } catch (e: unknown) {
+      // On mobile redirect the promise never rejects here (page leaves)
+      // so this only catches real errors on desktop
       console.error(e)
-      setError('Google sign-in failed. Make sure the domain is authorized in Firebase.')
+      setError('Google sign-in failed. Make sure this domain is authorized in Firebase Console → Authentication → Settings → Authorised domains.')
     } finally {
       setLoading(null)
     }
@@ -38,7 +55,7 @@ export default function LoginPage() {
     try {
       await signInAsGuest(name)
       navigate('/', { replace: true })
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
       setError('Could not create guest session. Check Firebase configuration.')
     } finally {
