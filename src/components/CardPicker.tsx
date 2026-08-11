@@ -14,6 +14,11 @@ interface CardPickerProps {
   onCancel: () => void
 }
 
+// ── Rules ─────────────────────────────────────────────────────────────────────
+
+/** Max physical cards of the same rank a single player can hold */
+const MAX_PER_RANK = 2
+
 // ── Scoring map ───────────────────────────────────────────────────────────────
 
 const CARD_POINTS: Record<string, number> = {
@@ -125,6 +130,7 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
   const [aiScore, setAiScore]               = useState<number | null>(null)
   const [points, setPoints]                 = useState('')
   const [saving, setSaving]                 = useState(false)
+  const [validationError, setValidationError] = useState('')
 
   const [cameraOpen, setCameraOpen]         = useState(false)
   const [stream, setStream]                 = useState<MediaStream | null>(null)
@@ -138,14 +144,33 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
   // ── Token count editing ───────────────────────────────────────────────────────
 
   const adjustCount = (token: string, delta: number) => {
+    setValidationError('')
     setEditableTokens(prev => {
+      const current = prev.find(t => t.token === token)
+      const newCount = Math.max(0, (current?.count ?? 0) + delta)
+      if (newCount > MAX_PER_RANK) {
+        setValidationError(
+          `Max ${MAX_PER_RANK} cards of the same rank per player (e.g. only 2 Aces, 2 Jokers).`
+        )
+        return prev  // reject the change
+      }
       const next = prev.map(t =>
-        t.token === token ? { ...t, count: Math.max(0, t.count + delta) } : t
+        t.token === token ? { ...t, count: newCount } : t
       ).filter(t => t.count > 0)
       const newScore = next.reduce((s, t) => s + t.points * t.count, 0)
       setPoints(String(newScore))
       return next
     })
+  }
+
+  /** Validate the current editableTokens against game rules. Returns error string or '' */
+  const validateTokens = (): string => {
+    for (const t of editableTokens) {
+      if (t.count > MAX_PER_RANK) {
+        return `Too many ${t.label}s: you entered ${t.count}, but max is ${MAX_PER_RANK} per rank per player.`
+      }
+    }
+    return ''
   }
 
   // ── Camera helpers ────────────────────────────────────────────────────────────
@@ -232,6 +257,7 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
   const retake = () => {
     setCapturedImage(null); setCompressedB64(null); setAiError(''); setPoints('')
     setEditableTokens([]); setRawFragments([]); setShowRaw(false); setAiScore(null)
+    setValidationError('')
     setPhase('shoot')
   }
 
@@ -239,6 +265,10 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
 
   const handleSave = async () => {
     if (!validScore) return
+    // Validate token counts
+    const err = validateTokens()
+    if (err) { setValidationError(err); return }
+    setValidationError('')
     setSaving(true)
     try {
       if (compressedB64 && aiScore !== null && score !== aiScore) {
@@ -399,8 +429,12 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
                             <button onClick={() => adjustCount(t.token, -1)} className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 active:bg-gray-100">
                               <Minus size={12} />
                             </button>
-                            <span className="w-5 text-center font-bold text-sm text-gray-900">{t.count}</span>
-                            <button onClick={() => adjustCount(t.token, +1)} className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 active:bg-gray-100">
+                            <span className={`w-5 text-center font-bold text-sm ${t.count >= MAX_PER_RANK ? 'text-red-600' : 'text-gray-900'}`}>{t.count}</span>
+                            <button
+                              onClick={() => adjustCount(t.token, +1)}
+                              disabled={t.count >= MAX_PER_RANK}
+                              className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
                               <Plus size={12} />
                             </button>
                             <span className="w-8 text-right text-sm font-bold text-brand-700">{t.points * t.count}</span>
@@ -468,12 +502,18 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
             )}
           </div>
 
-          {/* Save button — pinned bottom */}
+          {/* Validation error + Save button — pinned bottom */}
           {!analyzing && (
-            <div className="flex-shrink-0 px-4 pb-safe pb-4 pt-3 bg-white border-t border-gray-100">
+            <div className="flex-shrink-0 px-4 pb-safe pb-4 pt-3 bg-white border-t border-gray-100 space-y-2">
+              {validationError && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-700">
+                  <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                  <span>{validationError}</span>
+                </div>
+              )}
               <button
                 onClick={handleSave}
-                disabled={!validScore || saving}
+                disabled={!validScore || saving || !!validationError}
                 className="btn-primary w-full py-4 text-base gap-2 disabled:opacity-40"
               >
                 {saving

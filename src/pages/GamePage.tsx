@@ -6,7 +6,7 @@ import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
 import { useAuth } from '../contexts/AuthContext'
-import { Trophy, Plus, Flag, UserCheck, Star, UserPlus } from 'lucide-react'
+import { Trophy, Plus, Flag, UserCheck, Star, UserPlus, AlertTriangle } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number   // index into activePlayers array
@@ -37,6 +37,7 @@ export default function GamePage() {
   const [roundWinnerUid, setRoundWinnerUid]         = useState<string | null>(null)
   const [showWinnerPrompt, setShowWinnerPrompt]     = useState(false)
   const [suggestedWinnerUid, setSuggestedWinnerUid] = useState<string | null>(null)
+  const [roundError, setRoundError]                 = useState('')
 
   // Add player mid-game
   const [showAddPlayer, setShowAddPlayer]   = useState(false)
@@ -65,6 +66,7 @@ export default function GamePage() {
     if (!game || activePlayers.length === 0) return
     setRoundWinnerUid(null)
     setSuggestedWinnerUid(null)
+    setRoundError('')
     setPickerState({ playerIndex: 0, scores: {} })
     setAddingRound(true)
   }
@@ -136,6 +138,23 @@ export default function GamePage() {
 
   const submitRound = async (scores: Record<string, number>, winnerUid: string | null = roundWinnerUid) => {
     if (!gameId || !game) return
+
+    // ── Validation: every round must have exactly one winner (0 pts) ──────────
+    const hasWinner = Object.values(scores).some(s => s === 0)
+    if (!hasWinner) {
+      setRoundError(
+        'Every round must have a winner with 0 points. ' +
+        'Go back and mark which player won this round (⭐ button), or enter 0 for them.'
+      )
+      // Reset picker so user can fix it
+      setPickerState(null)
+      setAddingRound(false)
+      setRoundWinnerUid(null)
+      setSuggestedWinnerUid(null)
+      return
+    }
+    setRoundError('')
+
     setSubmitting(true)
     const prevEliminated = game.eliminatedPlayers ?? []
     try {
@@ -336,6 +355,23 @@ export default function GamePage() {
                 </span>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Round validation error */}
+      {roundError && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-300 rounded-2xl px-4 py-3">
+          <AlertTriangle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-red-700">Round cannot be saved</p>
+            <p className="text-sm text-red-600 mt-0.5">{roundError}</p>
+            <button
+              onClick={() => { setRoundError(''); startNewRound() }}
+              className="mt-2 text-xs font-semibold text-red-700 underline active:opacity-70"
+            >
+              Re-enter this round →
+            </button>
           </div>
         </div>
       )}
