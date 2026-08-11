@@ -40,8 +40,12 @@ export interface DetectedToken {
 function parseDetection(annotations: { description: string }[]): {
   tokens: DetectedToken[]
   score: number
+  rawFragments: string[]   // every text fragment Vision returned
 } {
-  const fragments = annotations.slice(1).map(a => a.description.trim().toUpperCase())
+  // annotations[0] is the full-image text block — skip it, use individual word annotations
+  const rawFragments = annotations.slice(1).map(a => a.description.trim()).filter(Boolean)
+  const fragments = rawFragments.map(f => f.toUpperCase())
+
   const tally: Record<string, number> = {}
   for (const f of fragments) {
     if (CARD_POINTS[f] !== undefined) tally[f] = (tally[f] ?? 0) + 1
@@ -51,7 +55,7 @@ function parseDetection(annotations: { description: string }[]): {
     return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token], count }
   })
   const score = tokens.reduce((sum, t) => sum + t.points * t.count, 0)
-  return { tokens, score }
+  return { tokens, score, rawFragments }
 }
 
 // ── Google Cloud Vision ───────────────────────────────────────────────────────
@@ -61,21 +65,22 @@ const VISION_API_KEY = import.meta.env.VITE_FIREBASE_API_KEY
 async function analyseImage(base64: string): Promise<{
   tokens: DetectedToken[]
   score: number
+  rawFragments: string[]
   error?: string
 }> {
   const body = {
-    requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION', maxResults: 100 }] }],
+    requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION', maxResults: 200 }] }],
   }
   const resp = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
   )
   const data = await resp.json()
-  if (!resp.ok) return { tokens: [], score: 0, error: data?.error?.message ?? `HTTP ${resp.status}` }
+  if (!resp.ok) return { tokens: [], score: 0, rawFragments: [], error: data?.error?.message ?? `HTTP ${resp.status}` }
   const response = data.responses?.[0]
-  if (response?.error) return { tokens: [], score: 0, error: response.error.message }
+  if (response?.error) return { tokens: [], score: 0, rawFragments: [], error: response.error.message }
   const annotations: { description: string }[] = response?.textAnnotations ?? []
-  if (annotations.length === 0) return { tokens: [], score: 0, error: 'No text detected. Enter score manually.' }
+  if (annotations.length === 0) return { tokens: [], score: 0, rawFragments: [], error: 'No text detected. Enter score manually.' }
   return parseDetection(annotations)
 }
 
@@ -110,6 +115,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
   const [analyzing, setAnalyzing]           = useState(false)
   const [aiError, setAiError]               = useState('')
   const [detectedTokens, setDetectedTokens] = useState<DetectedToken[]>([])
+  const [rawFragments, setRawFragments]     = useState<string[]>([])
+  const [showRaw, setShowRaw]               = useState(false)
   const [aiScore, setAiScore]               = useState<number | null>(null)
   const [points, setPoints]                 = useState('')
   const [saving, setSaving]                 = useState(false)
@@ -172,6 +179,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setAiError('')
     setPoints('')
     setDetectedTokens([])
+    setRawFragments([])
+    setShowRaw(false)
     setAiScore(null)
     setPhase('review')
 
@@ -189,8 +198,9 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
         gameId,
       }).catch(err => console.warn('Image save failed:', err))
 
-      const { tokens, score: detected, error } = await analyseImage(b64)
+      const { tokens, score: detected, rawFragments: frags, error } = await analyseImage(b64)
       setDetectedTokens(tokens)
+      setRawFragments(frags)
 
       if (error) {
         setAiError(error)
@@ -211,6 +221,8 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
     setAiError('')
     setPoints('')
     setDetectedTokens([])
+    setRawFragments([])
+    setShowRaw(false)
     setAiScore(null)
     setPhase('shoot')
   }
@@ -407,6 +419,38 @@ export default function CardPicker({ playerName, onConfirm, onCancel }: CardPick
                   <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm text-amber-700">
                     <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
                     <span>{aiError}</span>
+                  </div>
+                )}
+
+                {/* Raw Vision fragments — collapsible, helps diagnose wrong detection */}
+                {rawFragments.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 overflow-hidden text-xs">
+                    <button
+                      onClick={() => setShowRaw(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 text-gray-500 font-medium active:bg-gray-100"
+                    >
+                      <span>What Vision saw ({rawFragments.length} text fragments)</span>
+                      <span className="text-gray-400">{showRaw ? '▲' : '▼'}</span>
+                    </button>
+                    {showRaw && (
+                      <div className="px-3 py-2.5 flex flex-wrap gap-1.5 bg-white">
+                        {rawFragments.map((f, i) => (
+                          <span
+                            key={i}
+                            className={`px-2 py-0.5 rounded-md font-mono border ${
+                              CARD_POINTS[f.toUpperCase()] !== undefined
+                                ? 'bg-brand-50 border-brand-200 text-brand-700 font-bold'
+                                : 'bg-gray-50 border-gray-200 text-gray-400'
+                            }`}
+                          >
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 text-gray-400">
+                      <span className="text-brand-600 font-bold">bold blue</span> = matched as card rank · grey = ignored
+                    </p>
                   </div>
                 )}
 

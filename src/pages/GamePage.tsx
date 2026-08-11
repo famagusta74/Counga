@@ -78,10 +78,12 @@ export default function GamePage() {
     const nextIndex = pickerState.playerIndex + 1
 
     if (nextIndex < activePlayers.length) {
-      // Check: if ALL scores collected so far are > 0, suggest next player as winner
-      const allAboveZero = Object.values(newScores).every(s => s > 0)
-      if (allAboveZero && roundWinnerUid === null) {
-        // Suggest the next player as the round winner
+      // Only suggest the next player as round winner when:
+      //   1. they are the LAST player remaining (nextIndex === last index), AND
+      //   2. every score collected so far is > 0 (nobody else had 0 cards)
+      const isLastPlayer   = nextIndex === activePlayers.length - 1
+      const allAboveZero   = Object.values(newScores).every(s => s > 0)
+      if (isLastPlayer && allAboveZero && roundWinnerUid === null) {
         setSuggestedWinnerUid(activePlayers[nextIndex].uid)
         setPickerState({ playerIndex: nextIndex, scores: newScores })
         setShowWinnerPrompt(true)
