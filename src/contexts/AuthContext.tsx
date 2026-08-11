@@ -5,9 +5,7 @@ import {
   auth,
   googleProvider,
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
-  linkWithRedirect,
   signInAnonymously,
   signOut,
 } from '../firebase/config'
@@ -25,11 +23,6 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-/** Returns true on iOS or Android — these browsers block popups */
-function isMobileBrowser(): boolean {
-  return /iphone|ipad|ipod|android/i.test(navigator.userAgent)
-}
-
 function firebaseUserToAppUser(user: User, isGuest: boolean): AppUser {
   return {
     uid: user.uid,
@@ -42,37 +35,22 @@ function firebaseUserToAppUser(user: User, isGuest: boolean): AppUser {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null)
-  // Start as true — stays true until BOTH getRedirectResult AND onAuthStateChanged resolve
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let authStateResolved = false
     let redirectResolved  = false
 
-    // Mark loading done only when both have resolved
     const trySetLoaded = () => {
       if (authStateResolved && redirectResolved) setLoading(false)
     }
 
-    // 1. Pick up any pending redirect result (mobile Google sign-in return)
+    // Consume any pending redirect result (shouldn't be one since we use popup now,
+    // but keeps the gate symmetric so loading clears correctly)
     getRedirectResult(auth)
-      .then(async (result) => {
-        if (result?.user) {
-          const appUser = firebaseUserToAppUser(result.user, false)
-          setCurrentUser(appUser)
-          await upsertUser(appUser)
-          sessionStorage.removeItem('guestName')
-        }
-      })
-      .catch((err) => {
-        console.warn('getRedirectResult error:', err)
-      })
-      .finally(() => {
-        redirectResolved = true
-        trySetLoaded()
-      })
+      .catch(() => { /* ignore */ })
+      .finally(() => { redirectResolved = true; trySetLoaded() })
 
-    // 2. Subscribe to auth state changes
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         const isGuest = user.isAnonymous
@@ -97,13 +75,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe
   }, [])
 
+  // signInWithPopup works on iOS when called directly from a user-gesture handler.
+  // signInWithRedirect is broken on all iOS browsers (WebKit ITP blocks the
+  // cross-origin state cookie Firebase depends on).
   const signInWithGoogle = async () => {
-    if (isMobileBrowser()) {
-      // Redirect flow — page navigates to Google then back.
-      // getRedirectResult() in useEffect above picks up the result on return.
-      await signInWithRedirect(auth, googleProvider)
-      return   // page is leaving; nothing after this runs
-    }
     const result = await signInWithPopup(auth, googleProvider)
     const appUser = firebaseUserToAppUser(result.user, false)
     setCurrentUser(appUser)
@@ -124,10 +99,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const upgradeGuestToGoogle = async () => {
     if (!auth.currentUser) return
-    if (isMobileBrowser()) {
-      await linkWithRedirect(auth.currentUser, googleProvider)
-      return
-    }
     const result = await linkWithPopup(auth.currentUser, googleProvider)
     const appUser = firebaseUserToAppUser(result.user, false)
     setCurrentUser(appUser)

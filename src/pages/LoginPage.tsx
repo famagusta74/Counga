@@ -1,24 +1,23 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogIn, User, Chrome } from 'lucide-react'
+import { LogIn, User } from 'lucide-react'
 
 export default function LoginPage() {
   const { currentUser, loading: authLoading, signInWithGoogle, signInAsGuest } = useAuth()
   const navigate = useNavigate()
 
-  const [guestName, setGuestName] = useState('')
-  const [loading, setLoading] = useState<'google' | 'guest' | null>(null)
-  const [error, setError] = useState('')
+  const [guestName, setGuestName]   = useState('')
+  const [googleBusy, setGoogleBusy] = useState(false)
+  const [guestBusy, setGuestBusy]   = useState(false)
+  const [error, setError]           = useState('')
 
-  // Redirect once authenticated — useEffect so it never runs during render
+  // Redirect once authenticated
   useEffect(() => {
-    if (currentUser) {
-      navigate('/', { replace: true })
-    }
+    if (currentUser) navigate('/', { replace: true })
   }, [currentUser, navigate])
 
-  // While Firebase is resolving a pending redirect result, show a full-screen spinner
+  // Show spinner while Firebase resolves initial auth state
   if (authLoading) {
     return (
       <div className="min-h-screen bg-brand-950 flex items-center justify-center">
@@ -31,27 +30,33 @@ export default function LoginPage() {
   }
 
   const handleGoogle = async () => {
+    // IMPORTANT: signInWithPopup must be the FIRST thing called — no await, no
+    // setState before it. iOS WebKit closes the popup if a microtask runs first.
     setError('')
-    setLoading('google')
+    setGoogleBusy(true)
     try {
       await signInWithGoogle()
-      // On desktop the popup resolves here → navigate
-      // On mobile signInWithRedirect() redirects the page — navigate never reached
       navigate('/', { replace: true })
     } catch (e: unknown) {
-      // On mobile redirect the promise never rejects here (page leaves)
-      // so this only catches real errors on desktop
+      const msg = e instanceof Error ? e.message : String(e)
+      // auth/popup-blocked = popup was blocked by the browser
+      if (msg.includes('popup-blocked') || msg.includes('popup_blocked')) {
+        setError('Pop-up was blocked. Please allow pop-ups for this site in your browser settings, then try again.')
+      } else if (msg.includes('popup-closed-by-user') || msg.includes('popup_closed')) {
+        setError('Sign-in window was closed. Please try again.')
+      } else {
+        setError('Google sign-in failed: ' + msg)
+      }
       console.error(e)
-      setError('Google sign-in failed. Make sure this domain is authorized in Firebase Console → Authentication → Settings → Authorised domains.')
     } finally {
-      setLoading(null)
+      setGoogleBusy(false)
     }
   }
 
   const handleGuest = async () => {
     const name = guestName.trim() || 'Guest'
     setError('')
-    setLoading('guest')
+    setGuestBusy(true)
     try {
       await signInAsGuest(name)
       navigate('/', { replace: true })
@@ -59,39 +64,38 @@ export default function LoginPage() {
       console.error(e)
       setError('Could not create guest session. Check Firebase configuration.')
     } finally {
-      setLoading(null)
+      setGuestBusy(false)
     }
   }
 
   return (
     <div className="min-h-screen bg-brand-950 flex flex-col items-center justify-center px-6 py-12">
+
       {/* Logo */}
       <div className="text-center mb-10">
         <div className="text-6xl mb-4">🃏</div>
         <h1 className="text-3xl font-bold text-white tracking-tight">Counga</h1>
-        <p className="text-brand-300 mt-2 text-sm">Family & friends score tracker</p>
+        <p className="text-brand-300 mt-2 text-sm">Family &amp; friends score tracker</p>
+        <p className="text-brand-500 text-xs mt-1">v{__APP_VERSION__}</p>
       </div>
 
       <div className="w-full max-w-sm space-y-4">
+
         {/* Google Sign In */}
         <div className="card space-y-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-            <Chrome size={16} className="text-blue-500" />
-            Sign in with Google
-          </div>
           <p className="text-xs text-gray-500">
-            Your game history is saved to the cloud and accessible across devices.
+            Sign in to save your game history across devices.
           </p>
           <button
             onClick={handleGoogle}
-            disabled={loading !== null}
-            className="btn-primary w-full py-3"
+            disabled={googleBusy || guestBusy}
+            className="btn-primary w-full py-3.5 text-base"
           >
-            {loading === 'google' ? (
+            {googleBusy ? (
               <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
             ) : (
               <>
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                   <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
                   <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
@@ -127,33 +131,32 @@ export default function LoginPage() {
             placeholder="Your name (optional)"
             className="input"
             maxLength={30}
-            disabled={loading !== null}
+            disabled={googleBusy || guestBusy}
           />
           <button
             onClick={handleGuest}
-            disabled={loading !== null}
+            disabled={googleBusy || guestBusy}
             className="btn-secondary w-full py-3"
           >
-            {loading === 'guest' ? (
+            {guestBusy ? (
               <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-600" />
             ) : (
-              <>
-                <LogIn size={16} />
-                Play as Guest
-              </>
+              <><LogIn size={16} /> Play as Guest</>
             )}
           </button>
         </div>
 
         {error && (
-          <p className="text-sm text-red-300 bg-red-900/30 rounded-xl px-4 py-3 text-center">
-            {error}
-          </p>
+          <div className="text-sm text-red-300 bg-red-900/30 rounded-xl px-4 py-3 text-center space-y-1">
+            <p>{error}</p>
+            <p className="text-xs text-red-400 mt-1">
+              If the problem persists, try the Guest option below.
+            </p>
+          </div>
         )}
       </div>
 
-      {/* Footer note */}
-      <p className="text-brand-500 text-xs mt-10 text-center">
+      <p className="text-brand-600 text-xs mt-10 text-center">
         Counga · Built for family fun 🎴
       </p>
     </div>
