@@ -75,11 +75,26 @@ export default function NewGamePage() {
   }
 
   const handleStart = async () => {
-    if (players.length < 2) { setError('You need at least 2 players.'); return }
-    if (targetScore < 10)   { setError('Target score must be at least 10.'); return }
+    // If there's an unsaved name in the input, add it before starting
+    let finalPlayers = players
+    const pendingName = playerName.trim()
+    if (pendingName) {
+      if (players.some(p => p.displayName.toLowerCase() === pendingName.toLowerCase())) {
+        setError(`"${pendingName}" is already in the player list.`)
+        return
+      }
+      const uid = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const newPlayer = { uid, displayName: pendingName, isGuest: true }
+      finalPlayers = [...players, newPlayer]
+      setPlayers(finalPlayers)
+      setPlayerName('')
+    }
+
+    if (finalPlayers.length < 2) { setError('You need at least 2 players.'); return }
+    if (targetScore < 10)        { setError('Target score must be at least 10.'); return }
     setLoading(true)
     try {
-      const gameId = await createGame(targetScore, players)
+      const gameId = await createGame(targetScore, finalPlayers)
       navigate(`/game/${gameId}`)
     } catch (e) {
       console.error(e)
