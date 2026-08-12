@@ -44,16 +44,20 @@ jobs:
       #   FIREBASE_SERVICE_ACCOUNT  — paste the full JSON of a Firebase service account key
       #   (Firebase Console → Project Settings → Service Accounts → Generate new private key)
       - name: Deploy Firestore rules + indexes
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+        # FIREBASE_SERVICE_ACCOUNT secret must be set in GitHub → Settings → Secrets → Actions
+        # Value = full JSON of a Firebase service account private key
         env:
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
         run: |
-          # Write the service-account JSON to a temp file
-          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "⚠️  FIREBASE_SERVICE_ACCOUNT secret not set — skipping Firestore deploy"
+            exit 0
+          fi
+          echo "$FIREBASE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          # Deploy only Firestore rules and indexes (not hosting — that's handled above)
           npx firebase-tools@latest deploy \
             --only firestore:rules,firestore:indexes \
-            --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" \
+            --project "$FIREBASE_PROJECT_ID" \
             --non-interactive
           rm /tmp/sa.json
