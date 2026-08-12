@@ -9,7 +9,20 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Counga" />
     <title>Counga Score Keeper</title>
-    <script type="module" crossorigin src="/Counga/assets/index-DAQd1aRj.js"></script>
+    <script>
+      // Restore path redirected by 404.html (GitHub Pages SPA routing)
+      (function(){
+        var p = window.location.search.match(/[?&]p=([^&]*)/);
+        var h = window.location.search.match(/[?&]h=([^&]*)/);
+        if (p) {
+          window.history.replaceState(
+            null, null,
+            '/' + decodeURIComponent(p[1]) + (h ? '#' + decodeURIComponent(h[1]) : '')
+          );
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/Counga/assets/index-Bdwnhtzs.js"></script>
     <link rel="stylesheet" crossorigin href="/Counga/assets/index-BXQe4lAC.css">
   <link rel="manifest" href="/Counga/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/Counga/registerSW.js"></script></head>
   <body>
