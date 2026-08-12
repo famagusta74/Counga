@@ -56,12 +56,16 @@ export default function GroupsPage() {
     if (!currentUser || currentUser.isGuest) { setLoading(false); return }
     setLoadError('')
     try {
-      const [gs, inv] = await Promise.all([getMyGroups(), getPendingInvites()])
-      setGroups(gs)
-      setInvites(inv)
-    } catch (e) {
-      console.error('GroupsPage load error:', e)
-      setLoadError('Could not load groups. Check your connection and try again.')
+      // Run independently so one failure doesn't block the other
+      const [gsResult, invResult] = await Promise.allSettled([getMyGroups(), getPendingInvites()])
+      if (gsResult.status === 'fulfilled') setGroups(gsResult.value)
+      else console.error('getMyGroups failed:', gsResult.reason)
+      if (invResult.status === 'fulfilled') setInvites(invResult.value)
+      else console.error('getPendingInvites failed:', invResult.reason)
+      // Only show an error if both failed
+      if (gsResult.status === 'rejected' && invResult.status === 'rejected') {
+        setLoadError('Could not load groups — check your Firestore rules are deployed. ' + String(gsResult.reason))
+      }
     } finally {
       setLoading(false)
     }
