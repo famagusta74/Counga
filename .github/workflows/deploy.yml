@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy to GitHub Pages + Firebase
 
 on:
   push:
@@ -38,3 +38,22 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+
+      # ── Deploy Firestore rules + indexes to Firebase ───────────────────────
+      # Requires one secret in GitHub → Settings → Secrets → Actions:
+      #   FIREBASE_SERVICE_ACCOUNT  — paste the full JSON of a Firebase service account key
+      #   (Firebase Console → Project Settings → Service Accounts → Generate new private key)
+      - name: Deploy Firestore rules + indexes
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          # Write the service-account JSON to a temp file
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+          # Deploy only Firestore rules and indexes (not hosting — that's handled above)
+          npx firebase-tools@latest deploy \
+            --only firestore:rules,firestore:indexes \
+            --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" \
+            --non-interactive
+          rm /tmp/sa.json
