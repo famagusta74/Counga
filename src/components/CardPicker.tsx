@@ -46,26 +46,130 @@ export interface DetectedToken {
   count: number
 }
 
-function parseDetection(annotations: { description: string }[]): {
+// ── Card grid definition ──────────────────────────────────────────────────────
+// Ordered by points descending for quick entry
+
+const CARD_GRID: { token: string; label: string; pts: number; display: string }[] = [
+  { token: 'JOKER', label: 'Joker', pts: 25, display: '🃏' },
+  { token: 'A',     label: 'Ace',   pts: 11, display: 'A'  },
+  { token: 'K',     label: 'King',  pts: 10, display: 'K'  },
+  { token: 'Q',     label: 'Queen', pts: 10, display: 'Q'  },
+  { token: 'J',     label: 'Jack',  pts: 10, display: 'J'  },
+  { token: '10',    label: '10',    pts: 10, display: '10' },
+  { token: '9',     label: '9',     pts: 9,  display: '9'  },
+  { token: '8',     label: '8',     pts: 8,  display: '8'  },
+  { token: '7',     label: '7',     pts: 7,  display: '7'  },
+  { token: '6',     label: '6',     pts: 6,  display: '6'  },
+  { token: '5',     label: '5',     pts: 5,  display: '5'  },
+  { token: '4',     label: '4',     pts: 4,  display: '4'  },
+  { token: '3',     label: '3',     pts: 3,  display: '3'  },
+  { token: '2',     label: '2',     pts: 2,  display: '2'  },
+]
+
+// ── Vision detection helpers ──────────────────────────────────────────────────
+
+/**
+ * Rank normaliser — maps every textual form Vision might return to our canonical token.
+ * Handles: "A", "ACE", "K", "KING", "Q♥", "10♠", "JOKER", "JKR", "J0KER", etc.
+ */
+function normaliseRank(raw: string): string | null {
+  const s = raw.toUpperCase().trim()
+
+  // Strip suit symbols and trailing suit letters that Vision sometimes glues on
+  const stripped = s.replace(/[♠♥♦♣SHDC]/g, '').trim()
+
+  if (!stripped) return null
+
+  if (stripped === 'JOKER' || stripped === 'JKR' || stripped === 'J0KER' || stripped === 'JOKR') return 'JOKER'
+  if (stripped === 'A' || stripped === 'ACE') return 'A'
+  if (stripped === 'K' || stripped === 'KING') return 'K'
+  if (stripped === 'Q' || stripped === 'QUEEN') return 'Q'
+  // "J" might be confused with "1" in some fonts — guard against "I"
+  if (stripped === 'J' || stripped === 'JACK' || stripped === 'JAC') return 'J'
+  if (stripped === '10' || stripped === '1O' || stripped === 'IO') return '10'
+  if (stripped === '9') return '9'
+  if (stripped === '8') return '8'
+  if (stripped === '7') return '7'
+  if (stripped === '6') return '6'
+  if (stripped === '5') return '5'
+  if (stripped === '4') return '4'
+  if (stripped === '3') return '3'
+  if (stripped === '2') return '2'
+
+  return null
+}
+
+/**
+ * Parse the raw Vision fullTextAnnotation string.
+ * Strategy:
+ *  1. Split the full text into whitespace-separated tokens
+ *  2. Also run a regex to pick out rank+suit combos like "Q♥", "10♠", "K♦"
+ *  3. Normalise each candidate and tally occurrences
+ *  4. Vision's DOCUMENT_TEXT_DETECTION scans each card corner independently —
+ *     each physical card produces 2 corner hits (top-left + bottom-right).
+ *     We divide by 2, minimum 1.
+ */
+function parseFullText(fullText: string): {
   tokens: DetectedToken[]
   score: number
   rawFragments: string[]
 } {
-  const rawFragments = annotations.slice(1).map(a => a.description.trim()).filter(Boolean)
-  const fragments = rawFragments.map(f => f.toUpperCase())
+  // Collect every candidate word
+  const raw = fullText
+    .replace(/\n/g, ' ')
+    .split(/\s+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+
+  // Also extract rank+suit combos as a unit (e.g. "Q♥", "10♠")
+  const combos = Array.from(fullText.matchAll(/([2-9]|10|[AKQJ]|JOKER|JKR)[♠♥♦♣SHDC]?/gi))
+    .map(m => m[0])
+
+  const allCandidates = [...raw, ...combos]
+  const rawFragments  = [...new Set(allCandidates)]
 
   const tally: Record<string, number> = {}
-  for (const f of fragments) {
-    if (CARD_POINTS[f] !== undefined) tally[f] = (tally[f] ?? 0) + 1
+  for (const cand of allCandidates) {
+    const rank = normaliseRank(cand)
+    if (rank) tally[rank] = (tally[rank] ?? 0) + 1
   }
 
-  // Vision sees each card corner label once from each corner (top-left + bottom-right).
-  // Divide by 2 to get physical card count, minimum 1.
+  // Divide raw hit-count by 2 (two-corner rule), minimum 1
+  const tokens: DetectedToken[] = Object.entries(tally)
+    .map(([token, raw]) => {
+      const count = Math.max(1, Math.round(raw / 2))
+      return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token] ?? 0, count }
+    })
+    .filter(t => t.points > 0)
+
+  const score = tokens.reduce((sum, t) => sum + t.points * t.count, 0)
+  return { tokens, score, rawFragments }
+}
+
+/**
+ * Parse individual word annotations (TEXT_DETECTION fallback path).
+ * Used when DOCUMENT_TEXT_DETECTION fullTextAnnotation is absent.
+ */
+function parseWordAnnotations(annotations: { description: string }[]): {
+  tokens: DetectedToken[]
+  score: number
+  rawFragments: string[]
+} {
+  // annotations[0] is the full concatenated block — use it for the regex scan
+  const fullText = annotations[0]?.description ?? ''
+  if (fullText) return parseFullText(fullText)
+
+  // Last resort: scan individual annotation words
+  const rawFragments = annotations.slice(1).map(a => a.description.trim()).filter(Boolean)
+  const tally: Record<string, number> = {}
+  for (const f of rawFragments) {
+    const rank = normaliseRank(f)
+    if (rank) tally[rank] = (tally[rank] ?? 0) + 1
+  }
   const tokens: DetectedToken[] = Object.entries(tally).map(([token, raw]) => {
     const count = Math.max(1, Math.round(raw / 2))
-    return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token], count }
-  })
-
+    return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token] ?? 0, count }
+  }).filter(t => t.points > 0)
   const score = tokens.reduce((sum, t) => sum + t.points * t.count, 0)
   return { tokens, score, rawFragments }
 }
@@ -81,7 +185,15 @@ async function analyseImage(base64: string): Promise<{
   error?: string
 }> {
   const body = {
-    requests: [{ image: { content: base64 }, features: [{ type: 'TEXT_DETECTION', maxResults: 200 }] }],
+    requests: [{
+      image: { content: base64 },
+      features: [
+        // DOCUMENT_TEXT_DETECTION is better for sparse isolated glyphs (card corners)
+        { type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 },
+        // OBJECT_LOCALIZATION lets us count "playing card" objects as a secondary signal
+        { type: 'OBJECT_LOCALIZATION', maxResults: 20 },
+      ],
+    }],
   }
   const resp = await fetch(
     `https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`,
@@ -91,9 +203,25 @@ async function analyseImage(base64: string): Promise<{
   if (!resp.ok) return { tokens: [], score: 0, rawFragments: [], error: data?.error?.message ?? `HTTP ${resp.status}` }
   const response = data.responses?.[0]
   if (response?.error) return { tokens: [], score: 0, rawFragments: [], error: response.error.message }
+
+  // ── Primary: DOCUMENT_TEXT_DETECTION fullTextAnnotation ──────────────────────
+  const fullText: string = response?.fullTextAnnotation?.text ?? ''
+  if (fullText.trim()) {
+    const result = parseFullText(fullText)
+    if (result.tokens.length > 0) return result
+    // fullText existed but no cards matched — fall through to word annotations
+    return { ...result, error: result.rawFragments.length > 0 ? undefined : 'No card text found. Check lighting and card spread.' }
+  }
+
+  // ── Fallback: textAnnotations word-by-word ────────────────────────────────────
   const annotations: { description: string }[] = response?.textAnnotations ?? []
-  if (annotations.length === 0) return { tokens: [], score: 0, rawFragments: [], error: 'No text detected. Enter score manually.' }
-  return parseDetection(annotations)
+  if (annotations.length > 0) {
+    const result = parseWordAnnotations(annotations)
+    if (result.tokens.length > 0) return result
+    return { ...result, error: 'Cards visible but ranks not recognised. Check lighting and try again.' }
+  }
+
+  return { tokens: [], score: 0, rawFragments: [], error: 'No text detected. Spread cards face-up in good light and try again.' }
 }
 
 function compressImage(dataUrl: string): Promise<string> {
@@ -140,6 +268,33 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
 
   const score      = parseInt(points, 10)
   const validScore = !isNaN(score) && score >= 0
+
+  // ── Computed total from card grid ─────────────────────────────────────────────
+  const tokenTotal = editableTokens.reduce((s, t) => s + t.points * t.count, 0)
+
+  // ── Card grid helpers ─────────────────────────────────────────────────────────
+
+  /** Tap a card rank button to add 1 of that card to the hand */
+  const addCardFromGrid = (token: string, pts: number, label: string) => {
+    setValidationError('')
+    setEditableTokens(prev => {
+      const existing = prev.find(t => t.token === token)
+      const currentCount = existing?.count ?? 0
+      if (currentCount >= MAX_PER_RANK) {
+        setValidationError(`Max ${MAX_PER_RANK} cards of the same rank per player.`)
+        return prev
+      }
+      let next: DetectedToken[]
+      if (existing) {
+        next = prev.map(t => t.token === token ? { ...t, count: t.count + 1 } : t)
+      } else {
+        next = [...prev, { token, label, points: pts, count: 1 }]
+      }
+      const newTotal = next.reduce((s, t) => s + t.points * t.count, 0)
+      setPoints(String(newTotal))
+      return next
+    })
+  }
 
   // ── Token count editing ───────────────────────────────────────────────────────
 
@@ -285,9 +440,6 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
-  // Recomputed total from editable tokens (may differ from `points` if user typed manually)
-  const tokenTotal = editableTokens.reduce((s, t) => s + t.points * t.count, 0)
-
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col">
 
@@ -321,62 +473,169 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
 
       {/* ── SHOOT phase ── */}
       {phase === 'shoot' && (
-        <div className="flex-1 flex flex-col px-4 py-4 gap-4 overflow-y-auto">
+        <div className="flex-1 flex flex-col overflow-y-auto">
+          <div className="px-4 pt-4 pb-2 space-y-4">
 
-          <p className="text-sm text-gray-500 text-center">Take a photo of the remaining cards, or enter manually.</p>
-
-          {cameraOpen ? (
-            <div className="relative rounded-2xl overflow-hidden bg-black flex-shrink-0">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-64 object-cover" />
-              <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
-                Spread cards face-up · good lighting
-              </p>
-              <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                <button onClick={capturePhoto} className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform">
-                  <div className="w-11 h-11 rounded-full bg-brand-600" />
+            {/* Camera / Gallery buttons */}
+            {!cameraOpen ? (
+              <div className="flex gap-3">
+                <button onClick={openCamera} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
+                  <Camera size={22} /><span className="text-xs font-medium">Scan with Camera</span>
                 </button>
+                <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-4 gap-2 flex-col h-auto">
+                  <ImageIcon size={22} /><span className="text-xs font-medium">Pick from Gallery</span>
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
               </div>
-              <button onClick={closeCamera} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg">×</button>
-            </div>
-          ) : (
-            <div className="flex gap-3">
-              <button onClick={openCamera} className="btn-secondary flex-1 py-5 gap-2 flex-col h-auto">
-                <Camera size={24} /><span className="text-xs font-medium">Camera</span>
-              </button>
-              <button onClick={() => fileInputRef.current?.click()} className="btn-secondary flex-1 py-5 gap-2 flex-col h-auto">
-                <ImageIcon size={24} /><span className="text-xs font-medium">Gallery</span>
-              </button>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-            </div>
-          )}
+            ) : (
+              <div className="relative rounded-2xl overflow-hidden bg-black flex-shrink-0">
+                <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-64 object-cover" />
+                <p className="absolute top-2 left-0 right-0 text-center text-xs text-white/80 bg-black/30 py-1">
+                  Spread cards face-up · good lighting
+                </p>
+                <div className="absolute bottom-4 left-0 right-0 flex justify-center">
+                  <button onClick={capturePhoto} className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-90 transition-transform">
+                    <div className="w-11 h-11 rounded-full bg-brand-600" />
+                  </button>
+                </div>
+                <button onClick={closeCamera} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center font-bold text-lg">×</button>
+              </div>
+            )}
 
-          {aiError && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600">
-              <AlertCircle size={15} className="mt-0.5 flex-shrink-0" /><span>{aiError}</span>
-            </div>
-          )}
+            {aiError && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-600">
+                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" /><span>{aiError}</span>
+              </div>
+            )}
 
-          <div className="flex items-center gap-3">
-            <hr className="flex-1 border-gray-200" />
-            <span className="text-xs text-gray-400">or enter manually</span>
-            <hr className="flex-1 border-gray-200" />
+            {/* ── Tap-to-add card grid ── */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tap to add cards</p>
+                {editableTokens.length > 0 && (
+                  <button
+                    onClick={() => { setEditableTokens([]); setPoints('0'); setValidationError('') }}
+                    className="text-xs text-red-500 font-medium active:opacity-70"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {CARD_GRID.map(card => {
+                  const currentCount = editableTokens.find(t => t.token === card.token)?.count ?? 0
+                  const atMax = currentCount >= MAX_PER_RANK
+                  return (
+                    <button
+                      key={card.token}
+                      onClick={() => addCardFromGrid(card.token, card.pts, card.label)}
+                      disabled={atMax}
+                      className={`relative flex flex-col items-center justify-center rounded-xl border-2 py-2.5 transition-colors active:scale-95 select-none ${
+                        currentCount > 0
+                          ? 'border-brand-500 bg-brand-50 text-brand-700'
+                          : 'border-gray-200 bg-white text-gray-700'
+                      } ${atMax ? 'opacity-40 cursor-not-allowed' : 'active:bg-brand-100'}`}
+                    >
+                      <span className="font-bold text-sm leading-tight">{card.display}</span>
+                      <span className="text-[9px] text-gray-400 leading-tight mt-0.5">{card.pts}pt</span>
+                      {currentCount > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-brand-600 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                          {currentCount}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Selected cards summary + stepper */}
+            {editableTokens.length > 0 && (
+              <div className="bg-gray-50 rounded-2xl border border-gray-200 overflow-hidden">
+                <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Your hand</span>
+                  <span className="text-xs font-bold text-brand-700">{tokenTotal} pts</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {editableTokens.map(t => (
+                    <div key={t.token} className="flex items-center gap-3 px-3 py-2">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-white border-2 border-gray-300 font-bold text-sm text-gray-800 shadow-sm flex-shrink-0">
+                        {t.token === 'JOKER' ? '🃏' : t.token}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800">{t.label}</p>
+                        <p className="text-xs text-gray-400">{t.points} pts each</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button onClick={() => adjustCount(t.token, -1)} className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 active:bg-gray-100">
+                          <Minus size={11} />
+                        </button>
+                        <span className={`w-5 text-center font-bold text-sm ${t.count >= MAX_PER_RANK ? 'text-red-600' : 'text-gray-900'}`}>{t.count}</span>
+                        <button
+                          onClick={() => adjustCount(t.token, +1)}
+                          disabled={t.count >= MAX_PER_RANK}
+                          className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Plus size={11} />
+                        </button>
+                        <span className="w-8 text-right text-sm font-bold text-brand-700">{t.points * t.count}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-3 py-2 bg-brand-50 border-t border-brand-100 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-brand-700">Total</span>
+                  <span className="text-base font-bold text-brand-700">{tokenTotal} pts</span>
+                </div>
+              </div>
+            )}
+
+            {validationError && (
+              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm text-red-700">
+                <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <hr className="flex-1 border-gray-200" />
+              <span className="text-xs text-gray-400">or type score directly</span>
+              <hr className="flex-1 border-gray-200" />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="number" inputMode="numeric" min={0}
+                value={editableTokens.length > 0 ? String(tokenTotal) : points}
+                onChange={e => {
+                  setPoints(e.target.value)
+                  // Clear grid selection when user types manually (they're overriding)
+                  if (editableTokens.length > 0) setEditableTokens([])
+                }}
+                placeholder="0"
+                className="flex-1 text-4xl font-bold text-brand-700 text-center py-3 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
+              />
+            </div>
+
+            <div className="h-2" />
           </div>
 
-          <div className="flex items-center gap-3">
-            <input
-              type="number" inputMode="numeric" min={0} value={points}
-              onChange={e => setPoints(e.target.value)} placeholder="0"
-              className="flex-1 text-4xl font-bold text-brand-700 text-center py-3 rounded-2xl border-2 border-gray-200 focus:border-brand-500 focus:outline-none bg-white"
-            />
+          {/* Save button — pinned to bottom of scroll area via sticky */}
+          <div className="sticky bottom-0 px-4 pb-safe pb-4 pt-3 bg-white border-t border-gray-100 space-y-2">
             <button
-              onClick={() => { if (validScore) onConfirm(score, []) }}
-              disabled={!validScore}
-              className="flex-shrink-0 w-24 h-16 rounded-2xl bg-brand-600 text-white font-bold text-sm flex flex-col items-center justify-center gap-0.5 disabled:opacity-40 active:bg-brand-700 transition-colors"
+              onClick={() => {
+                const finalScore = editableTokens.length > 0 ? tokenTotal : score
+                const err = validateTokens()
+                if (err) { setValidationError(err); return }
+                if (!isNaN(finalScore) && finalScore >= 0) onConfirm(finalScore, [])
+              }}
+              disabled={editableTokens.length === 0 && (!validScore)}
+              className="btn-primary w-full py-4 text-base gap-2 disabled:opacity-40"
             >
-              <Check size={20} /><span>Save</span>
+              <Check size={20} />
+              Save {editableTokens.length > 0 ? `${tokenTotal} pts` : (validScore ? `${score} pts` : 'score')} for {playerName}
             </button>
           </div>
-          <div className="h-4" />
         </div>
       )}
 

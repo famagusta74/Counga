@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { getRecentGames } from '../firebase/db'
+import { getRecentGames, getPendingInvites } from '../firebase/db'
 import type { Game } from '../types'
-import { PlusCircle, Trophy, ChevronRight } from 'lucide-react'
+import { PlusCircle, Trophy, ChevronRight, Users } from 'lucide-react'
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {
@@ -15,12 +15,18 @@ export default function HomePage() {
   const { currentUser } = useAuth()
   const [recentGames, setRecentGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
+  const [pendingInviteCount, setPendingInviteCount] = useState(0)
 
   useEffect(() => {
     getRecentGames(5)
       .then(setRecentGames)
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!currentUser || currentUser.isGuest) return
+    getPendingInvites().then(invites => setPendingInviteCount(invites.length))
+  }, [currentUser])
 
   const activeGames = recentGames.filter(g => g.status === 'active')
   const finishedGames = recentGames.filter(g => g.status === 'finished')
@@ -37,10 +43,23 @@ export default function HomePage() {
             : 'Your games are saved to the cloud ☁️'
           }
         </p>
-        <Link to="/new-game" className="inline-flex items-center gap-2 mt-4 bg-white/15 hover:bg-white/25 active:bg-white/30 transition-colors rounded-xl px-4 py-2.5 text-sm font-medium">
-          <PlusCircle size={16} />
-          Start New Game
-        </Link>
+        <div className="flex gap-2 mt-4 flex-wrap">
+          <Link to="/new-game" className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 active:bg-white/30 transition-colors rounded-xl px-4 py-2.5 text-sm font-medium">
+            <PlusCircle size={16} />
+            Start New Game
+          </Link>
+          {!currentUser?.isGuest && (
+            <Link to="/groups" className="relative inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 active:bg-white/30 transition-colors rounded-xl px-4 py-2.5 text-sm font-medium">
+              <Users size={16} />
+              Groups
+              {pendingInviteCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingInviteCount}
+                </span>
+              )}
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Active games */}

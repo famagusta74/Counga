@@ -16,6 +16,33 @@ export interface AppUser {
   photoURL?: string | null
 }
 
+// A player group (created by a verified Google-auth user)
+export interface Group {
+  id: string
+  name: string
+  ownerUid: string
+  memberUids: string[]        // confirmed member uids (includes owner)
+  pendingInviteUids: string[] // uids who have been invited but not yet accepted
+  createdAt: number
+}
+
+// An invite stored on the invitee's user doc for fast inbox lookup
+export interface GroupInvite {
+  groupId: string
+  groupName: string
+  ownerUid: string
+  ownerName: string
+  invitedAt: number
+}
+
+// Lightweight user search result
+export interface UserSearchResult {
+  uid: string
+  displayName: string
+  email: string | null
+  photoURL: string | null
+}
+
 // Player in a game session
 export interface Player {
   uid: string
@@ -41,6 +68,7 @@ export interface Game {
   eliminatedPlayers: string[]          // uids of players who exceeded targetScore
   totalScores: Record<string, number>  // uid -> cumulative points
   winner: string | null                // uid of winner
+  roundCount: number                   // total rounds played (incremented on each addRound)
   createdAt: number
   finishedAt: number | null
   createdBy: string                    // uid

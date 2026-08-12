@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { createGame, getActiveGameForUser, abandonGame } from '../firebase/db'
-import type { Player, Game } from '../types'
-import { Plus, Trash2, Users, Target, LogIn, AlertTriangle, ArrowRight } from 'lucide-react'
+import { createGame, getActiveGameForUser, abandonGame, getGroup, searchUsersByName } from '../firebase/db'
+import type { Player, Game, UserSearchResult } from '../types'
+import { Plus, Trash2, Users, Target, LogIn, AlertTriangle, ArrowRight, Search } from 'lucide-react'
 
 export default function NewGamePage() {
   const { currentUser } = useAuth()
   const navigate = useNavigate()
+  const location  = useLocation()
+  // If navigated from Groups page, state contains { groupId, groupName }
+  const groupState = location.state as { groupId?: string; groupName?: string } | null
 
   const [targetScore, setTargetScore] = useState(200)
   const [playerName, setPlayerName] = useState('')
@@ -26,6 +29,49 @@ export default function NewGamePage() {
   const [activeGame, setActiveGame] = useState<Game | null>(null)
   const [showActiveModal, setShowActiveModal] = useState(false)
   const [abandoning, setAbandoning] = useState(false)
+
+  // User search (for verified player autocomplete)
+  const [searchResults, setSearchResults]   = useState<UserSearchResult[]>([])
+  const [searching, setSearching]           = useState(false)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  // If came from a group, auto-load group members
+  useEffect(() => {
+    if (!groupState?.groupId || !currentUser) return
+    getGroup(groupState.groupId).then(group => {
+      if (!group) return
+      // Build player list from memberUids — use uid as display name placeholder,
+      // we'll use the displayName from current user for self
+      const groupPlayers: Player[] = group.memberUids.map(uid => ({
+        uid,
+        displayName: uid === currentUser.uid ? currentUser.displayName : uid,
+        isGuest: uid === currentUser.uid ? currentUser.isGuest : false,
+      }))
+      setPlayers(groupPlayers)
+    })
+  }, [groupState?.groupId, currentUser])
+
+  // Search verified users as player name is typed
+  useEffect(() => {
+    if (!playerName.trim() || playerName.length < 2 || currentUser?.isGuest) {
+      setSearchResults([])
+      setShowSuggestions(false)
+      return
+    }
+    const t = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const results = await searchUsersByName(playerName)
+        const existingUids = new Set(players.map(p => p.uid))
+        const filtered = results.filter(r => !existingUids.has(r.uid))
+        setSearchResults(filtered)
+        setShowSuggestions(filtered.length > 0)
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [playerName, players, currentUser])
 
   // Check for existing active game on mount
   useEffect(() => {
@@ -56,6 +102,16 @@ export default function NewGamePage() {
     }
   }
 
+  /** Add a verified (Google) user from search results */
+  const addVerifiedPlayer = (user: UserSearchResult) => {
+    if (players.some(p => p.uid === user.uid)) return
+    setPlayers(prev => [...prev, { uid: user.uid, displayName: user.displayName, isGuest: false }])
+    setPlayerName('')
+    setSearchResults([])
+    setShowSuggestions(false)
+    setError('')
+  }
+
   const addPlayer = () => {
     const name = playerName.trim()
     if (!name) return
@@ -66,6 +122,8 @@ export default function NewGamePage() {
     const uid = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     setPlayers(prev => [...prev, { uid, displayName: name, isGuest: true }])
     setPlayerName('')
+    setSearchResults([])
+    setShowSuggestions(false)
     setError('')
   }
 
@@ -116,7 +174,12 @@ export default function NewGamePage() {
     <div className="space-y-5 pb-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">New Game</h1>
-        <p className="text-sm text-gray-500 mt-1">Set up a fresh Counga session</p>
+        <p className="text-sm text-gray-500 mt-1">
+          {groupState?.groupName
+            ? <span>From group: <strong>{groupState.groupName}</strong></span>
+            : 'Set up a fresh Counga session'
+          }
+        </p>
       </div>
 
       {/* Target Score */}
@@ -155,9 +218,16 @@ export default function NewGamePage() {
 
       {/* Players */}
       <div className="card space-y-3">
-        <div className="flex items-center gap-2 text-brand-700 font-semibold">
-          <Users size={18} />
-          <span>Players ({players.length})</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-brand-700 font-semibold">
+            <Users size={18} />
+            <span>Players ({players.length})</span>
+          </div>
+          {groupState?.groupName && (
+            <span className="badge badge-blue text-xs gap-1">
+              <Users size={10} /> {groupState.groupName}
+            </span>
+          )}
         </div>
         <ul className="space-y-2">
           {players.map(p => (
@@ -166,6 +236,7 @@ export default function NewGamePage() {
                 <span className="text-base">{p.uid === currentUser?.uid ? '🧑‍💻' : '👤'}</span>
                 <span className="font-medium text-sm">{p.displayName}</span>
                 {p.uid === currentUser?.uid && <span className="badge badge-blue">you</span>}
+                {!p.isGuest && p.uid !== currentUser?.uid && <span className="badge badge-green text-xs">verified</span>}
                 {p.isGuest && p.uid !== currentUser?.uid && <span className="badge badge-amber">guest</span>}
               </div>
               {p.uid !== currentUser?.uid && (
@@ -176,19 +247,58 @@ export default function NewGamePage() {
             </li>
           ))}
         </ul>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={playerName}
-            onChange={e => setPlayerName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addPlayer()}
-            placeholder="Add player name…"
-            className="input flex-1"
-            maxLength={30}
-          />
-          <button onClick={addPlayer} className="btn-primary px-3" disabled={!playerName.trim()}>
-            <Plus size={18} />
-          </button>
+        {/* Add player input with live search */}
+        <div className="space-y-1">
+          <div className="flex gap-2 relative">
+            <div className="relative flex-1">
+              {!currentUser?.isGuest && (
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              )}
+              <input
+                type="text"
+                value={playerName}
+                onChange={e => { setPlayerName(e.target.value); setError('') }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { setShowSuggestions(false); addPlayer() }
+                  if (e.key === 'Escape') setShowSuggestions(false)
+                }}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                onFocus={() => searchResults.length > 0 && setShowSuggestions(true)}
+                placeholder={currentUser?.isGuest ? 'Add player name…' : 'Add player (type to search verified users)…'}
+                className={`input w-full ${!currentUser?.isGuest ? 'pl-8' : ''}`}
+                maxLength={30}
+              />
+              {searching && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin rounded-full h-3 w-3 border-b-2 border-brand-400 block" />
+              )}
+            </div>
+            <button onClick={addPlayer} className="btn-primary px-3 flex-shrink-0" disabled={!playerName.trim()}>
+              <Plus size={18} />
+            </button>
+          </div>
+
+          {/* Search suggestions dropdown */}
+          {showSuggestions && searchResults.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+              {searchResults.map(u => (
+                <button
+                  key={u.uid}
+                  onMouseDown={e => e.preventDefault()} // prevent blur before click
+                  onClick={() => addVerifiedPlayer(u)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-brand-50 active:bg-brand-100 transition-colors text-left border-b border-gray-50 last:border-0"
+                >
+                  <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-brand-700">
+                    {u.displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{u.displayName}</p>
+                    {u.email && <p className="text-xs text-gray-400 truncate">{u.email}</p>}
+                  </div>
+                  <span className="badge badge-green text-xs flex-shrink-0">verified</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

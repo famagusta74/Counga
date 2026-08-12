@@ -6,6 +6,8 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  arrayUnion,
+  arrayRemove,
   collection,
   query,
   where,
@@ -14,7 +16,7 @@ import {
   Timestamp,
   serverTimestamp,
 } from './config'
-import type { Game, Round, Player, AppUser } from '../types'
+import type { Game, Round, Player, AppUser, Group, GroupInvite, UserSearchResult } from '../types'
 
 // ── User helpers ───────────────────────────────────────────────────────────────
 
@@ -22,6 +24,8 @@ export async function upsertUser(user: AppUser): Promise<void> {
   const ref = doc(db, 'users', user.uid)
   await setDoc(ref, {
     displayName: user.displayName,
+    // Stored lowercase for case-insensitive prefix search
+    displayNameLower: user.displayName.toLowerCase(),
     email: user.email,
     isGuest: user.isGuest,
     photoURL: user.photoURL ?? null,
@@ -47,6 +51,7 @@ export async function createGame(
     eliminatedPlayers: [],
     totalScores,
     winner: null,
+    roundCount: 0,
     createdAt: Date.now(),
     finishedAt: null,
     createdBy: uid,
@@ -62,6 +67,7 @@ export async function getGame(gameId: string): Promise<Game | null> {
   const data = snap.data() as Record<string, unknown>
   return {
     eliminatedPlayers: [],
+    roundCount: 0,
     ...data,
     id: snap.id,
   } as unknown as Game
@@ -128,6 +134,7 @@ export async function addRound(
   await updateDoc(gameRef, {
     totalScores: newTotals,
     eliminatedPlayers: allEliminated,
+    roundCount: (game.roundCount ?? 0) + 1,
     status,
     winner,
     finishedAt,
@@ -167,6 +174,7 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
   )
   return snap.docs.map(d => ({
     eliminatedPlayers: [] as string[],
+    roundCount: 0,
     ...d.data(),
     id: d.id,
   } as unknown as Game))
@@ -185,7 +193,7 @@ export async function getActiveGameForUser(uid: string): Promise<Game | null> {
   )
   if (snap.empty) return null
   const d = snap.docs[0]
-  return { eliminatedPlayers: [] as string[], ...d.data(), id: d.id } as unknown as Game
+  return { eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game
 }
 
 /** Abandons a game without a winner */
@@ -280,4 +288,171 @@ export async function finishGameManually(gameId: string): Promise<void> {
     winner,
     finishedAt: Date.now(),
   })
+}
+
+
+/** Fetch basic profile info for a list of uids. */
+export async function getUserProfiles(uids: string[]): Promise<Record<string, { displayName: string; email: string | null; photoURL: string | null }>> {
+  if (uids.length === 0) return {}
+  const results: Record<string, { displayName: string; email: string | null; photoURL: string | null }> = {}
+  // Fetch in parallel (Firestore doesn't have a batch-get by uid in client SDK, so individual reads)
+  await Promise.all(uids.map(async uid => {
+    try {
+      const snap = await getDoc(doc(db, 'users', uid))
+      if (snap.exists()) {
+        const d = snap.data()
+        results[uid] = { displayName: d.displayName ?? uid, email: d.email ?? null, photoURL: d.photoURL ?? null }
+      } else {
+        results[uid] = { displayName: uid, email: null, photoURL: null }
+      }
+    } catch {
+      results[uid] = { displayName: uid, email: null, photoURL: null }
+    }
+  }))
+  return results
+}
+
+
+// ── Groups ─────────────────────────────────────────────────────────────────────
+
+/** Search verified (non-guest) users by display name prefix. Max 10 results. */
+export async function searchUsersByName(query_str: string): Promise<UserSearchResult[]> {
+  if (!query_str.trim()) return []
+  const lower = query_str.toLowerCase().trim()
+  // Firestore prefix search: displayNameLower >= lower AND < lower + '\uf8ff'
+  const snap = await getDocs(
+    query(
+      collection(db, 'users'),
+      where('displayNameLower', '>=', lower),
+      where('displayNameLower', '<', lower + '\uf8ff'),
+      where('isGuest', '==', false),
+      limit(10),
+    )
+  )
+  const currentUid = auth.currentUser?.uid ?? ''
+  return snap.docs
+    .filter(d => d.id !== currentUid) // exclude self
+    .map(d => {
+      const data = d.data()
+      return {
+        uid: d.id,
+        displayName: data.displayName ?? '',
+        email: data.email ?? null,
+        photoURL: data.photoURL ?? null,
+      }
+    })
+}
+
+/** Create a new group. Owner is automatically added as member. */
+export async function createGroup(name: string): Promise<string> {
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('Must be signed in to create a group')
+  const ref = doc(collection(db, 'groups'))
+  const group: Omit<Group, 'id'> = {
+    name: name.trim(),
+    ownerUid: uid,
+    memberUids: [uid],
+    pendingInviteUids: [],
+    createdAt: Date.now(),
+  }
+  await setDoc(ref, group)
+  // Add groupId to owner's user doc
+  await updateDoc(doc(db, 'users', uid), { groupIds: arrayUnion(ref.id) })
+  return ref.id
+}
+
+/** Fetch all groups the current user belongs to. */
+export async function getMyGroups(): Promise<Group[]> {
+  const uid = auth.currentUser?.uid
+  if (!uid) return []
+  const snap = await getDocs(
+    query(collection(db, 'groups'), where('memberUids', 'array-contains', uid))
+  )
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Group))
+}
+
+/** Fetch a single group by id. */
+export async function getGroup(groupId: string): Promise<Group | null> {
+  const snap = await getDoc(doc(db, 'groups', groupId))
+  if (!snap.exists()) return null
+  return { id: snap.id, ...snap.data() } as Group
+}
+
+/**
+ * Invite a verified user to a group.
+ * Writes invite metadata to /groups/{groupId}/invites/{inviteeUid}
+ * and also to /users/{inviteeUid}/pendingInvites/{groupId} for inbox display.
+ */
+export async function inviteUserToGroup(
+  groupId: string,
+  groupName: string,
+  inviteeUid: string,
+): Promise<void> {
+  const ownerUid = auth.currentUser?.uid
+  if (!ownerUid) throw new Error('Must be signed in')
+
+  // Get owner display name
+  const ownerSnap = await getDoc(doc(db, 'users', ownerUid))
+  const ownerName: string = ownerSnap.exists() ? (ownerSnap.data().displayName ?? 'Someone') : 'Someone'
+
+  const now = Date.now()
+
+  // Mark invitee uid as pending on the group doc
+  await updateDoc(doc(db, 'groups', groupId), {
+    pendingInviteUids: arrayUnion(inviteeUid),
+  })
+
+  // Write invite to invitee's inbox (sub-collection for clean reads)
+  const invite: GroupInvite = { groupId, groupName, ownerUid, ownerName, invitedAt: now }
+  await setDoc(doc(db, 'users', inviteeUid, 'groupInvites', groupId), invite)
+}
+
+/** Get all pending group invites for the current user. */
+export async function getPendingInvites(): Promise<GroupInvite[]> {
+  const uid = auth.currentUser?.uid
+  if (!uid) return []
+  const snap = await getDocs(collection(db, 'users', uid, 'groupInvites'))
+  return snap.docs.map(d => d.data() as GroupInvite)
+}
+
+/** Accept a group invite. */
+export async function acceptGroupInvite(groupId: string): Promise<void> {
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error('Must be signed in')
+
+  const { deleteDoc } = await import('firebase/firestore')
+  const inviteRef = doc(db, 'users', uid, 'groupInvites', groupId)
+
+  await updateDoc(doc(db, 'groups', groupId), {
+    memberUids: arrayUnion(uid),
+    pendingInviteUids: arrayRemove(uid),
+  })
+  await updateDoc(doc(db, 'users', uid), { groupIds: arrayUnion(groupId) })
+  await deleteDoc(inviteRef)
+}
+
+/** Decline (remove) a group invite. */
+export async function declineGroupInvite(groupId: string): Promise<void> {
+  const uid = auth.currentUser?.uid
+  if (!uid) return
+  const { deleteDoc } = await import('firebase/firestore')
+  await updateDoc(doc(db, 'groups', groupId), {
+    pendingInviteUids: arrayRemove(uid),
+  })
+  await deleteDoc(doc(db, 'users', uid, 'groupInvites', groupId))
+}
+
+/** Remove a member from a group (owner only). */
+export async function removeMemberFromGroup(groupId: string, memberUid: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), {
+    memberUids: arrayRemove(memberUid),
+  })
+  await updateDoc(doc(db, 'users', memberUid), {
+    groupIds: arrayRemove(groupId),
+  })
+}
+
+/** Rename a group (owner only). */
+export async function renameGroup(groupId: string, newName: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), { name: newName.trim() })
 }

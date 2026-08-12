@@ -135,11 +135,18 @@ export default function HistoryPage() {
                       </div>
                     )}
 
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <Users size={13} className="text-gray-400" />
-                      <span className="text-xs text-gray-500">
-                        {game.players.map(p => p.displayName).join(', ')}
-                      </span>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <div className="flex items-center gap-1">
+                        <Users size={13} className="text-gray-400" />
+                        <span className="text-xs text-gray-500">
+                          {game.players.map(p => p.displayName).join(', ')}
+                        </span>
+                      </div>
+                      {(game.roundCount ?? 0) > 0 && (
+                        <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full font-medium">
+                          {game.roundCount} rounds
+                        </span>
+                      )}
                     </div>
 
                     {/* Mini score row */}

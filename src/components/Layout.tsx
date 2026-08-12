@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Home, PlusCircle, Clock, LogOut, User } from 'lucide-react'
+import { Home, PlusCircle, Clock, LogOut, User, Users } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Layout() {
@@ -82,6 +82,17 @@ export default function Layout() {
           >
             <Clock size={20} />
             <span>History</span>
+          </NavLink>
+          <NavLink
+            to="/groups"
+            className={({ isActive }) =>
+              `flex-1 flex flex-col items-center py-2.5 text-xs font-medium gap-1 transition-colors ${
+                isActive ? 'text-brand-600' : 'text-gray-500 hover:text-gray-700'
+              }`
+            }
+          >
+            <Users size={20} />
+            <span>Groups</span>
           </NavLink>
         </div>
       </nav>

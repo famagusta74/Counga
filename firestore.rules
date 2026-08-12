@@ -3,9 +3,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can read/write their own profile
+    // Users: own profile read/write; any verified user can read others (for search/invite display)
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+
+      // Group invite inbox — only the invitee can read/delete; invite senders write via service
+      match /groupInvites/{groupId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if request.auth != null; // group owner writes here
+      }
     }
 
     // Games: any authenticated user (including anonymous) can create games
@@ -31,6 +38,21 @@ service cloud.firestore {
     match /scanFeedback/{docId} {
       allow create: if request.auth != null;
       allow read:   if request.auth != null && request.auth.uid == resource.data.uid;
+    }
+
+    // Groups: any member can read; only owner can update membership/name;
+    // verified users can create groups
+    match /groups/{groupId} {
+      allow read:   if request.auth != null &&
+                       (resource.data.ownerUid == request.auth.uid ||
+                        request.auth.uid in resource.data.memberUids ||
+                        request.auth.uid in resource.data.pendingInviteUids);
+      allow create: if request.auth != null && !request.auth.token.firebase.sign_in_provider.matches('anonymous');
+      allow update: if request.auth != null &&
+                       (resource.data.ownerUid == request.auth.uid ||
+                        // allow accepting/declining invites (member adds self)
+                        request.auth.uid in resource.data.pendingInviteUids);
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
     }
   }
 }
