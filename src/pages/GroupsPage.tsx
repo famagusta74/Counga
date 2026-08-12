@@ -27,6 +27,7 @@ export default function GroupsPage() {
   const [groups, setGroups]             = useState<Group[]>([])
   const [invites, setInvites]           = useState<GroupInvite[]>([])
   const [loading, setLoading]           = useState(true)
+  const [loadError, setLoadError]       = useState('')
 
   // Create group
   const [showCreate, setShowCreate]     = useState(false)
@@ -53,10 +54,17 @@ export default function GroupsPage() {
 
   const load = useCallback(async () => {
     if (!currentUser || currentUser.isGuest) { setLoading(false); return }
-    const [gs, inv] = await Promise.all([getMyGroups(), getPendingInvites()])
-    setGroups(gs)
-    setInvites(inv)
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [gs, inv] = await Promise.all([getMyGroups(), getPendingInvites()])
+      setGroups(gs)
+      setInvites(inv)
+    } catch (e) {
+      console.error('GroupsPage load error:', e)
+      setLoadError('Could not load groups. Check your connection and try again.')
+    } finally {
+      setLoading(false)
+    }
   }, [currentUser])
 
   useEffect(() => { load() }, [load])
@@ -202,6 +210,18 @@ export default function GroupsPage() {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-brand-600" />
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-4 pb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Groups</h1>
+        <div className="card text-center py-10 space-y-3">
+          <p className="text-red-600 font-medium">{loadError}</p>
+          <button onClick={load} className="btn-primary mx-auto">Retry</button>
+        </div>
       </div>
     )
   }
@@ -475,7 +495,10 @@ export default function GroupsPage() {
                       </ul>
                     )}
                     {inviteQuery.length >= 2 && !searching && searchResults.length === 0 && (
-                      <p className="text-xs text-gray-400">No verified users found matching "{inviteQuery}"</p>
+                      <div className="text-xs text-gray-400 space-y-1">
+                        <p>No verified users found matching "{inviteQuery}".</p>
+                        <p className="text-gray-400">They must have signed in with Google at least once to appear here.</p>
+                      </div>
                     )}
                     {inviteMsg && (
                       <p className={`text-xs font-medium ${inviteMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>

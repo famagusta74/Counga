@@ -9,6 +9,19 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Counga" />
     <title>Counga Score Keeper</title>
+    <script>
+      // Restore path redirected by 404.html (GitHub Pages SPA routing)
+      (function(){
+        var p = window.location.search.match(/[?&]p=([^&]*)/);
+        var h = window.location.search.match(/[?&]h=([^&]*)/);
+        if (p) {
+          window.history.replaceState(
+            null, null,
+            '/' + decodeURIComponent(p[1]) + (h ? '#' + decodeURIComponent(h[1]) : '')
+          );
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

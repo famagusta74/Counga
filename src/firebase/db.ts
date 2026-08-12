@@ -315,32 +315,59 @@ export async function getUserProfiles(uids: string[]): Promise<Record<string, { 
 
 // ── Groups ─────────────────────────────────────────────────────────────────────
 
-/** Search verified (non-guest) users by display name prefix. Max 10 results. */
+/** Search verified (non-guest) users by display name prefix. Max 10 results.
+ *
+ * Runs two queries in parallel:
+ *  1. displayNameLower prefix search (users who signed in after v1.9.0)
+ *  2. displayName exact-case prefix search (catches users with older docs)
+ * Results are merged and deduplicated.
+ */
 export async function searchUsersByName(query_str: string): Promise<UserSearchResult[]> {
   if (!query_str.trim()) return []
   const lower = query_str.toLowerCase().trim()
-  // Firestore prefix search: displayNameLower >= lower AND < lower + '\uf8ff'
-  const snap = await getDocs(
-    query(
+  const original = query_str.trim()
+
+  const [snapLower, snapOriginal] = await Promise.all([
+    // Query 1: lowercase field (new users post-v1.9.0)
+    getDocs(query(
       collection(db, 'users'),
       where('displayNameLower', '>=', lower),
       where('displayNameLower', '<', lower + '\uf8ff'),
-      where('isGuest', '==', false),
-      limit(10),
-    )
-  )
+      limit(15),
+    )).catch(() => null),
+    // Query 2: original-case displayName (older users, case-sensitive but still useful)
+    getDocs(query(
+      collection(db, 'users'),
+      where('displayName', '>=', original),
+      where('displayName', '<', original + '\uf8ff'),
+      limit(15),
+    )).catch(() => null),
+  ])
+
   const currentUid = auth.currentUser?.uid ?? ''
-  return snap.docs
-    .filter(d => d.id !== currentUid) // exclude self
-    .map(d => {
+  const seen = new Set<string>()
+  const results: UserSearchResult[] = []
+
+  const processSnap = (snap: typeof snapLower) => {
+    if (!snap) return
+    snap.docs.forEach(d => {
+      if (d.id === currentUid || seen.has(d.id)) return
       const data = d.data()
-      return {
+      if (data.isGuest !== false) return // only verified users
+      seen.add(d.id)
+      results.push({
         uid: d.id,
         displayName: data.displayName ?? '',
         email: data.email ?? null,
         photoURL: data.photoURL ?? null,
-      }
+      })
     })
+  }
+
+  processSnap(snapLower)
+  processSnap(snapOriginal)
+
+  return results.slice(0, 10)
 }
 
 /** Create a new group. Owner is automatically added as member. */
