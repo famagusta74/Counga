@@ -315,59 +315,43 @@ export async function getUserProfiles(uids: string[]): Promise<Record<string, { 
 
 // ── Groups ─────────────────────────────────────────────────────────────────────
 
-/** Search verified (non-guest) users by display name prefix. Max 10 results.
+/**
+ * Search verified (non-guest) users by name substring — case-insensitive.
  *
- * Runs two queries in parallel:
- *  1. displayNameLower prefix search (users who signed in after v1.9.0)
- *  2. displayName exact-case prefix search (catches users with older docs)
- * Results are merged and deduplicated.
+ * Fetches all non-guest user docs (up to 200) and filters client-side.
+ * This is reliable regardless of whether displayNameLower exists on old docs,
+ * and works for a family/friends-scale app.
  */
 export async function searchUsersByName(query_str: string): Promise<UserSearchResult[]> {
   if (!query_str.trim()) return []
-  const lower = query_str.toLowerCase().trim()
-  const original = query_str.trim()
+  const needle = query_str.toLowerCase().trim()
 
-  const [snapLower, snapOriginal] = await Promise.all([
-    // Query 1: lowercase field (new users post-v1.9.0)
-    getDocs(query(
+  const snap = await getDocs(
+    query(
       collection(db, 'users'),
-      where('displayNameLower', '>=', lower),
-      where('displayNameLower', '<', lower + '\uf8ff'),
-      limit(15),
-    )).catch(() => null),
-    // Query 2: original-case displayName (older users, case-sensitive but still useful)
-    getDocs(query(
-      collection(db, 'users'),
-      where('displayName', '>=', original),
-      where('displayName', '<', original + '\uf8ff'),
-      limit(15),
-    )).catch(() => null),
-  ])
+      where('isGuest', '==', false),
+      limit(200),
+    )
+  )
 
   const currentUid = auth.currentUser?.uid ?? ''
-  const seen = new Set<string>()
-  const results: UserSearchResult[] = []
 
-  const processSnap = (snap: typeof snapLower) => {
-    if (!snap) return
-    snap.docs.forEach(d => {
-      if (d.id === currentUid || seen.has(d.id)) return
+  return snap.docs
+    .filter(d => {
+      if (d.id === currentUid) return false
+      const name: string = (d.data().displayName ?? '').toLowerCase()
+      return name.includes(needle)
+    })
+    .slice(0, 10)
+    .map(d => {
       const data = d.data()
-      if (data.isGuest !== false) return // only verified users
-      seen.add(d.id)
-      results.push({
+      return {
         uid: d.id,
         displayName: data.displayName ?? '',
         email: data.email ?? null,
         photoURL: data.photoURL ?? null,
-      })
+      }
     })
-  }
-
-  processSnap(snapLower)
-  processSnap(snapOriginal)
-
-  return results.slice(0, 10)
 }
 
 /** Create a new group. Owner is automatically added as member. */
