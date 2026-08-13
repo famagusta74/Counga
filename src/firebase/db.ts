@@ -196,6 +196,11 @@ export async function getActiveGameForUser(uid: string): Promise<Game | null> {
   return { eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game
 }
 
+/** Update the target score for an active game */
+export async function updateTargetScore(gameId: string, newTarget: number): Promise<void> {
+  await updateDoc(doc(db, 'games', gameId), { targetScore: newTarget })
+}
+
 /** Abandons a game without a winner */
 export async function abandonGame(gameId: string): Promise<void> {
   await updateDoc(doc(db, 'games', gameId), {

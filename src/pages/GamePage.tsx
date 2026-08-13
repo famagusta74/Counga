@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGame, getRounds, addRound, finishGameManually, updateRound, addPlayerToGame } from '../firebase/db'
+import { getGame, getRounds, addRound, finishGameManually, updateRound, addPlayerToGame, updateTargetScore } from '../firebase/db'
 import type { Game, Round } from '../types'
 import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
 import { useAuth } from '../contexts/AuthContext'
-import { Trophy, Plus, Flag, UserCheck, Star, UserPlus, AlertTriangle } from 'lucide-react'
+import { Trophy, Plus, Flag, UserCheck, Star, UserPlus, AlertTriangle, Target } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number   // index into activePlayers array
@@ -14,6 +14,71 @@ type PickerState = {
 }
 
 type PostRoundState = 'idle' | 'asking' | 'finishing'
+
+// ── Inline sub-component so checkbox state stays local ────────────────────────
+function ChangeTargetPanel({
+  currentTarget, input, error, saving, onInput, onSave, onCancel,
+}: {
+  currentTarget: number
+  input: string
+  error: string
+  saving: boolean
+  onInput: (v: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  const [agreed, setAgreed] = useState(false)
+  const val = parseInt(input, 10)
+  const canSave = agreed && !isNaN(val) && val >= 10 && !saving
+
+  return (
+    <div className="px-5 py-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Target size={15} className="text-brand-600" />
+        <p className="text-sm font-semibold text-gray-800">Change target score</p>
+      </div>
+      <p className="text-xs text-gray-500">
+        Current target: <strong>{currentTarget} pts</strong>. Enter the new agreed target.
+      </p>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={10}
+        value={input}
+        onChange={e => onInput(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && canSave && onSave()}
+        placeholder={String(currentTarget)}
+        className="input text-center text-xl font-bold"
+        autoFocus
+      />
+      <label className="flex items-start gap-2.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={agreed}
+          onChange={e => setAgreed(e.target.checked)}
+          className="mt-0.5 w-4 h-4 accent-brand-600 flex-shrink-0"
+        />
+        <span className="text-xs text-gray-600">
+          All players have agreed to change the target to <strong>{isNaN(val) ? '?' : val} pts</strong>.
+        </span>
+      </label>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="btn-secondary flex-1">Cancel</button>
+        <button
+          onClick={onSave}
+          disabled={!canSave}
+          className="btn-primary flex-1 gap-2 disabled:opacity-40"
+        >
+          {saving
+            ? <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            : <><Target size={14} /> Save new target</>
+          }
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function GamePage() {
   const { gameId } = useParams<{ gameId: string }>()
@@ -46,6 +111,12 @@ export default function GamePage() {
   const [newPlayerName, setNewPlayerName]   = useState('')
   const [addingPlayer, setAddingPlayer]     = useState(false)
   const [addPlayerError, setAddPlayerError] = useState('')
+
+  // Change target score mid-game
+  const [showChangeTarget, setShowChangeTarget] = useState(false)
+  const [newTargetInput, setNewTargetInput]     = useState('')
+  const [changingTarget, setChangingTarget]     = useState(false)
+  const [changeTargetError, setChangeTargetError] = useState('')
 
   const load = useCallback(async () => {
     if (!gameId) return
@@ -203,6 +274,28 @@ export default function GamePage() {
     setShowAddPlayer(false)
     setNewPlayerName('')
     setAddPlayerError('')
+    setShowChangeTarget(false)
+    setNewTargetInput('')
+    setChangeTargetError('')
+  }
+
+  const handleChangeTarget = async () => {
+    const val = parseInt(newTargetInput, 10)
+    if (isNaN(val) || val < 10) { setChangeTargetError('Enter a valid target (minimum 10 pts).'); return }
+    if (!gameId || !game) return
+    if (val === game.targetScore) { setShowChangeTarget(false); return }
+    setChangingTarget(true)
+    setChangeTargetError('')
+    try {
+      await updateTargetScore(gameId, val)
+      await load()
+      setShowChangeTarget(false)
+      setNewTargetInput('')
+    } catch {
+      setChangeTargetError('Could not update target. Try again.')
+    } finally {
+      setChangingTarget(false)
+    }
   }
 
   const handleAddPlayer = async () => {
@@ -622,6 +715,17 @@ export default function GamePage() {
                   </button>
                 </div>
               </div>
+            ) : showChangeTarget ? (
+              /* ── Change target panel ── */
+              <ChangeTargetPanel
+                currentTarget={game.targetScore}
+                input={newTargetInput}
+                error={changeTargetError}
+                saving={changingTarget}
+                onInput={v => { setNewTargetInput(v); setChangeTargetError('') }}
+                onSave={handleChangeTarget}
+                onCancel={() => { setShowChangeTarget(false); setNewTargetInput(''); setChangeTargetError('') }}
+              />
             ) : (
               <div className="px-5 py-4 space-y-2">
                 <button
@@ -635,6 +739,12 @@ export default function GamePage() {
                   className="btn-secondary w-full py-2.5 gap-2"
                 >
                   <UserPlus size={15} /> Add a player to the game
+                </button>
+                <button
+                  onClick={() => { setShowChangeTarget(true); setNewTargetInput(String(game.targetScore)) }}
+                  className="btn-secondary w-full py-2.5 gap-2"
+                >
+                  <Target size={15} /> Change target score ({game.targetScore} pts)
                 </button>
                 <button
                   onClick={handlePostRoundEnd}
