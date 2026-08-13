@@ -467,3 +467,91 @@ export async function removeMemberFromGroup(groupId: string, memberUid: string):
 export async function renameGroup(groupId: string, newName: string): Promise<void> {
   await updateDoc(doc(db, 'groups', groupId), { name: newName.trim() })
 }
+
+// ── Player stats ───────────────────────────────────────────────────────────────
+
+export interface PlayerStats {
+  uid: string
+  gamesPlayed: number
+  gameWins: number
+  gameLosses: number
+  gameWinRatio: number      // 0–1
+  roundsPlayed: number
+  roundWins: number
+  roundLosses: number
+  roundWinRatio: number     // 0–1
+}
+
+/**
+ * Fetch all finished games that include `uid` as a player, then compute KPIs.
+ * We query games where the player appears — Firestore doesn't support
+ * array-contains on nested fields, so we fetch all finished games and
+ * filter client-side. Capped at 500 for performance.
+ */
+export async function getPlayerStats(uid: string): Promise<PlayerStats> {
+  const snap = await getDocs(
+    query(
+      collection(db, 'games'),
+      where('status', '==', 'finished'),
+      orderBy('createdAt', 'desc'),
+      limit(500),
+    )
+  )
+
+  let gamesPlayed = 0
+  let gameWins    = 0
+  let roundsPlayed = 0
+  let roundWins    = 0
+
+  for (const d of snap.docs) {
+    const g = { eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game
+    const inGame = g.players.some(p => p.uid === uid)
+    if (!inGame) continue
+
+    gamesPlayed++
+    if (g.winner === uid) gameWins++
+
+    // Fetch rounds for this game to count round wins
+    const rSnap = await getDocs(collection(db, 'games', d.id, 'rounds'))
+    for (const rd of rSnap.docs) {
+      const round = rd.data()
+      // Player participated in this round if their uid is in scores
+      if (uid in (round.scores ?? {})) {
+        roundsPlayed++
+        if (round.roundWinnerUid === uid) roundWins++
+      }
+    }
+  }
+
+  const gameLosses   = gamesPlayed - gameWins
+  const roundLosses  = roundsPlayed - roundWins
+  return {
+    uid,
+    gamesPlayed,
+    gameWins,
+    gameLosses,
+    gameWinRatio:  gamesPlayed  > 0 ? gameWins  / gamesPlayed  : 0,
+    roundsPlayed,
+    roundWins,
+    roundLosses,
+    roundWinRatio: roundsPlayed > 0 ? roundWins / roundsPlayed : 0,
+  }
+}
+
+/** Fetch finished games that include `uid` as a player (own history). */
+export async function getGamesForPlayer(uid: string, count = 50): Promise<Game[]> {
+  // Firestore can't query array-contains on a nested field (players[].uid),
+  // so we fetch recent finished games and filter client-side.
+  const snap = await getDocs(
+    query(
+      collection(db, 'games'),
+      where('status', '==', 'finished'),
+      orderBy('createdAt', 'desc'),
+      limit(200),
+    )
+  )
+  return snap.docs
+    .map(d => ({ eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game))
+    .filter(g => g.players.some(p => p.uid === uid))
+    .slice(0, count)
+}

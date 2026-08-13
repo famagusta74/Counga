@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { getRecentGames } from '../firebase/db'
 import { useAuth } from '../contexts/AuthContext'
 import type { Game } from '../types'
-import { Clock, Trophy, ChevronRight, Users, UserCheck } from 'lucide-react'
+import { Clock, Trophy, ChevronRight, Users, UserCheck, BarChart2 } from 'lucide-react'
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {
@@ -81,9 +81,16 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-4 pb-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">History</h1>
-        <p className="text-sm text-gray-500 mt-1">{games.length} game{games.length !== 1 ? 's' : ''} recorded</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">History</h1>
+          <p className="text-sm text-gray-500 mt-1">{games.length} game{games.length !== 1 ? 's' : ''} recorded</p>
+        </div>
+        {currentUser && !currentUser.isGuest && (
+          <Link to={`/player/${currentUser.uid}`} className="btn-secondary text-xs px-3 py-2 gap-1.5 flex-shrink-0">
+            <BarChart2 size={13} /> My stats
+          </Link>
+        )}
       </div>
 
       {games.length === 0 ? (

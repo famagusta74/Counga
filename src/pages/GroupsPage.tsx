@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getMyGroups,
@@ -346,8 +346,9 @@ export default function GroupsPage() {
 
       {/* ── Group detail sheet ── */}
       {selectedGroup && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col"
+               style={{ maxHeight: 'calc(100dvh - env(safe-area-inset-bottom, 0px) - 56px)' }}>
 
             {/* Header */}
             <div className="bg-brand-950 text-white px-5 py-4 flex-shrink-0 flex items-center justify-between">
@@ -395,7 +396,7 @@ export default function GroupsPage() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" />
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto pb-safe" style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}>
 
                 {/* Use group to start a game */}
                 <div className="px-5 py-3 bg-brand-50 border-b border-brand-100">
@@ -424,11 +425,11 @@ export default function GroupsPage() {
                         <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-sm font-bold text-brand-700">
                           {displayName.charAt(0).toUpperCase()}
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <Link to={`/player/${uid}`} onClick={() => setSelectedGroup(null)} className="flex-1 min-w-0 min-h-0">
                           <p className="text-sm font-medium truncate">{displayName}</p>
                           {profile?.email && !isMe && <p className="text-xs text-gray-400 truncate">{profile.email}</p>}
                           {isOwner && <p className="text-xs text-brand-600">owner</p>}
-                        </div>
+                        </Link>
                         {selectedGroup.ownerUid === currentUser?.uid && !isMe && (
                           <button
                             onClick={() => handleRemoveMember(uid)}

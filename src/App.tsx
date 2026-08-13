@@ -7,6 +7,7 @@ import NewGamePage from './pages/NewGamePage'
 import GamePage from './pages/GamePage'
 import HistoryPage from './pages/HistoryPage'
 import GroupsPage from './pages/GroupsPage'
+import PlayerProfilePage from './pages/PlayerProfilePage'
 import { useAuth } from './contexts/AuthContext'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -41,6 +42,9 @@ export default function App() {
             } />
             <Route path="/groups" element={
               <RequireAuth><GroupsPage /></RequireAuth>
+            } />
+            <Route path="/player/:uid" element={
+              <RequireAuth><PlayerProfilePage /></RequireAuth>
             } />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
