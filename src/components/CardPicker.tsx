@@ -75,8 +75,12 @@ const CARD_GRID: { token: string; label: string; pts: number; display: string }[
 function normaliseRank(raw: string): string | null {
   const s = raw.toUpperCase().trim()
 
-  // Strip suit symbols and trailing suit letters that Vision sometimes glues on
-  const stripped = s.replace(/[♠♥♦♣SHDC]/g, '').trim()
+  // Strip suit symbols, trailing suit letters, and any non-alphanumeric characters
+  // (Vision sometimes produces unicode box chars like □ ☐ ם glued to rank letters)
+  const stripped = s
+    .replace(/[♠♥♦♣SHDC]/g, '')
+    .replace(/[^A-Z0-9]/g, '')   // remove all remaining non-alphanumeric noise
+    .trim()
 
   if (!stripped) return null
 
@@ -104,40 +108,44 @@ function normaliseRank(raw: string): string | null {
  * Strategy:
  *  1. Split the full text into whitespace-separated tokens
  *  2. Also run a regex to pick out rank+suit combos like "Q♥", "10♠", "K♦"
- *  3. Normalise each candidate and tally occurrences
- *  4. Vision's DOCUMENT_TEXT_DETECTION scans each card corner independently —
- *     each physical card produces 2 corner hits (top-left + bottom-right).
- *     We divide by 2, minimum 1.
+ *  3. Normalise each candidate, strip unicode noise, and tally occurrences
+ *  4. Cap each rank at MAX_PER_RANK (2) — the old ÷2 heuristic misfired when
+ *     Vision sees centre-of-card text, producing 3× hits for some ranks.
+ *     Capping directly is more robust and simpler.
  */
 function parseFullText(fullText: string): {
   tokens: DetectedToken[]
   score: number
   rawFragments: string[]
 } {
-  // Collect every candidate word
-  const raw = fullText
+  // Collect every candidate token (whitespace-split)
+  const rawTokens = fullText
     .replace(/\n/g, ' ')
     .split(/\s+/)
     .map(s => s.trim())
     .filter(Boolean)
 
-  // Also extract rank+suit combos as a unit (e.g. "Q♥", "10♠")
-  const combos = Array.from(fullText.matchAll(/([2-9]|10|[AKQJ]|JOKER|JKR)[♠♥♦♣SHDC]?/gi))
+  // Also extract rank+suit combos as a unit (e.g. "Q♥", "10♠", "K□" → normalised)
+  const combos = Array.from(fullText.matchAll(/([2-9]|10|[AKQJ]|JOKER|JKR)[♠♥♦♣SHDC\W]?/gi))
     .map(m => m[0])
 
-  const allCandidates = [...raw, ...combos]
-  const rawFragments  = [...new Set(allCandidates)]
+  const allCandidates = [...rawTokens, ...combos]
+
+  // Only keep tokens that actually contain at least one alphanumeric character
+  // (filters noise like pure suit symbols or box characters)
+  const cleanCandidates = allCandidates.filter(c => /[A-Za-z0-9]/.test(c))
+  const rawFragments = [...new Set(cleanCandidates)]
 
   const tally: Record<string, number> = {}
-  for (const cand of allCandidates) {
+  for (const cand of cleanCandidates) {
     const rank = normaliseRank(cand)
     if (rank) tally[rank] = (tally[rank] ?? 0) + 1
   }
 
-  // Divide raw hit-count by 2 (two-corner rule), minimum 1
+  // Cap at MAX_PER_RANK instead of ÷2 — safer when Vision reads centre text too
   const tokens: DetectedToken[] = Object.entries(tally)
-    .map(([token, raw]) => {
-      const count = Math.max(1, Math.round(raw / 2))
+    .map(([token, hits]) => {
+      const count = Math.min(hits, MAX_PER_RANK)
       return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token] ?? 0, count }
     })
     .filter(t => t.points > 0)
@@ -166,8 +174,8 @@ function parseWordAnnotations(annotations: { description: string }[]): {
     const rank = normaliseRank(f)
     if (rank) tally[rank] = (tally[rank] ?? 0) + 1
   }
-  const tokens: DetectedToken[] = Object.entries(tally).map(([token, raw]) => {
-    const count = Math.max(1, Math.round(raw / 2))
+  const tokens: DetectedToken[] = Object.entries(tally).map(([token, hits]) => {
+    const count = Math.min(hits, MAX_PER_RANK)
     return { token, label: TOKEN_LABEL[token] ?? token, points: CARD_POINTS[token] ?? 0, count }
   }).filter(t => t.points > 0)
   const score = tokens.reduce((sum, t) => sum + t.points * t.count, 0)
