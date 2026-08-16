@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import type { CardRank } from '../types'
 import { Camera, Check, RefreshCw, Loader, AlertCircle, X, ImageIcon, Star, Plus, Minus } from 'lucide-react'
@@ -273,6 +273,21 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
 
   const videoRef     = useRef<HTMLVideoElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Keep a ref so the cleanup effect always has the latest stream without stale closure
+  const streamRef    = useRef<MediaStream | null>(null)
+
+  // ── Camera stream cleanup on unmount ─────────────────────────────────────────
+  // Without this, navigating away while the camera is open leaves the browser
+  // indicator light on and the stream running in the background.
+  useEffect(() => {
+    streamRef.current = stream
+  }, [stream])
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach(t => t.stop())
+    }
+  }, [])
 
   const score      = parseInt(points, 10)
   const validScore = !isNaN(score) && score >= 0
@@ -395,10 +410,8 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
       const b64 = compressed.split(',')[1]
       setCompressedB64(b64)
 
-      // Save image immediately for training
-      saveScanFeedback({
-        imageBase64: b64, detectedTokens: [], aiScore: 0, playerName, gameId,
-      }).catch(err => console.warn('Image save failed:', err))
+      // Note: scan feedback is saved only once at confirm time (handleSave),
+      // not here — avoids duplicate low-quality pre-result records.
 
       const { tokens, score: detected, rawFragments: frags, error } = await analyseImage(b64)
       setEditableTokens(tokens)
@@ -434,11 +447,18 @@ export default function CardPicker({ playerName, roundWinnerUid, onConfirm, onWi
     setValidationError('')
     setSaving(true)
     try {
-      if (compressedB64 && aiScore !== null && score !== aiScore) {
-        saveScanFeedback({
-          imageBase64: compressedB64, detectedTokens: editableTokens,
-          aiScore, correctedScore: score, playerName, gameId,
-        }).catch(err => console.warn('Feedback save failed:', err))
+      // Always save one feedback record at confirm time with the final state.
+      // correctedScore is only included when the user changed the AI suggestion.
+      if (compressedB64) {
+        const feedback = {
+          imageBase64: compressedB64,
+          detectedTokens: editableTokens,
+          aiScore: aiScore ?? score,
+          playerName,
+          gameId,
+          ...(aiScore !== null && score !== aiScore ? { correctedScore: score } : {}),
+        }
+        saveScanFeedback(feedback).catch(err => console.warn('Feedback save failed:', err))
       }
       onConfirm(score, [])
     } finally {

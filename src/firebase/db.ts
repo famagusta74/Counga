@@ -13,9 +13,11 @@ import {
   where,
   orderBy,
   limit,
+  onSnapshot,
   Timestamp,
   serverTimestamp,
 } from './config'
+import type { Unsubscribe } from 'firebase/firestore'
 import type { Game, Round, Player, AppUser, Group, GroupInvite, UserSearchResult } from '../types'
 
 // ── User helpers ───────────────────────────────────────────────────────────────
@@ -44,10 +46,14 @@ export async function createGame(
   const totalScores: Record<string, number> = {}
   players.forEach(p => { totalScores[p.uid] = 0 })
 
-  const game: Omit<Game, 'id'> = {
+  // playerUids is a flat array for array-contains queries (participant filtering)
+  const playerUids = players.map(p => p.uid)
+
+  const game: Omit<Game, 'id'> & { playerUids: string[] } = {
     targetScore,
     status: 'active',
     players,
+    playerUids,
     eliminatedPlayers: [],
     totalScores,
     winner: null,
@@ -152,11 +158,14 @@ export async function addPlayerToGame(
   if (!gameSnap.exists()) return
   const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
 
-  const updatedPlayers    = [...game.players, player]
-  const updatedTotals     = { ...game.totalScores, [player.uid]: startingScore }
+  const updatedPlayers = [...game.players, player]
+  const updatedTotals  = { ...game.totalScores, [player.uid]: startingScore }
+  // Keep playerUids in sync for participant queries
+  const updatedPlayerUids = [...(((game as unknown as Record<string, unknown>).playerUids as string[]) ?? game.players.map(p => p.uid)), player.uid]
 
   await updateDoc(gameRef, {
     players:     updatedPlayers,
+    playerUids:  updatedPlayerUids,
     totalScores: updatedTotals,
   })
 }
@@ -168,16 +177,89 @@ export async function getRounds(gameId: string): Promise<Round[]> {
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as Round))
 }
 
-export async function getRecentGames(count = 20): Promise<Game[]> {
-  const snap = await getDocs(
-    query(collection(db, 'games'), orderBy('createdAt', 'desc'), limit(count))
+// ── Real-time listeners ────────────────────────────────────────────────────────
+
+export type { Unsubscribe }
+
+/**
+ * Subscribe to live updates for a game document.
+ * Returns an unsubscribe function — call it on component unmount.
+ */
+export function subscribeToGame(
+  gameId: string,
+  callback: (game: Game | null) => void,
+): Unsubscribe {
+  return onSnapshot(doc(db, 'games', gameId), (snap) => {
+    if (!snap.exists()) { callback(null); return }
+    callback({
+      eliminatedPlayers: [],
+      roundCount: 0,
+      ...snap.data(),
+      id: snap.id,
+    } as unknown as Game)
+  })
+}
+
+/**
+ * Subscribe to live updates for all rounds in a game.
+ * Delivers rounds ordered by roundNumber on every change.
+ * Returns an unsubscribe function — call it on component unmount.
+ */
+export function subscribeToRounds(
+  gameId: string,
+  callback: (rounds: Round[]) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'games', gameId, 'rounds'), orderBy('roundNumber')),
+    (snap) => {
+      callback(snap.docs.map(d => ({ id: d.id, ...d.data() } as Round)))
+    },
   )
-  return snap.docs.map(d => ({
-    eliminatedPlayers: [] as string[],
-    roundCount: 0,
-    ...d.data(),
-    id: d.id,
-  } as unknown as Game))
+}
+
+/**
+ * Returns recent games that the current user participated in (as creator or player).
+ * Queries by createdBy for simplicity; also fetches games where the uid appears in
+ * totalScores (participant-indexed), then merges and deduplicates.
+ */
+export async function getRecentGames(count = 20): Promise<Game[]> {
+  const uid = auth.currentUser?.uid
+  if (!uid) return []
+
+  // Fetch games created by the user
+  const [byCreator, byPlayer] = await Promise.all([
+    getDocs(query(
+      collection(db, 'games'),
+      where('createdBy', '==', uid),
+      orderBy('createdAt', 'desc'),
+      limit(count),
+    )),
+    // Firestore supports array-contains on a flat string field.
+    // We store playerUids as a flat array on the game document (added in createGame).
+    getDocs(query(
+      collection(db, 'games'),
+      where('playerUids', 'array-contains', uid),
+      orderBy('createdAt', 'desc'),
+      limit(count),
+    )),
+  ])
+
+  const seen = new Set<string>()
+  const games: Game[] = []
+  for (const snap of [byCreator, byPlayer]) {
+    for (const d of snap.docs) {
+      if (seen.has(d.id)) continue
+      seen.add(d.id)
+      games.push({
+        eliminatedPlayers: [] as string[],
+        roundCount: 0,
+        ...d.data(),
+        id: d.id,
+      } as unknown as Game)
+    }
+  }
+  games.sort((a, b) => b.createdAt - a.createdAt)
+  return games.slice(0, count)
 }
 
 /** Returns the active game created by the current user, if any */
@@ -210,7 +292,10 @@ export async function abandonGame(gameId: string): Promise<void> {
   })
 }
 
-/** Updates a single round's scores then recomputes all totals from scratch */
+/**
+ * Updates a single round's scores then fully replays all rounds to recompute
+ * totals, eliminations, and game status/winner from scratch.
+ */
 export async function updateRound(
   gameId: string,
   roundId: string,
@@ -222,34 +307,60 @@ export async function updateRound(
   // 1. Save the edited round first
   await updateDoc(roundRef, { scores: newScores })
 
-  // 2. Fetch ALL round docs (no orderBy → no index required)
+  // 2. Fetch ALL round docs + game doc in parallel
   const [allRoundsSnap, gameSnap] = await Promise.all([
     getDocs(collection(db, 'games', gameId, 'rounds')),
     getDoc(gameRef),
   ])
 
   if (!gameSnap.exists()) return
-  const game = { eliminatedPlayers: [] as string[], ...gameSnap.data() } as unknown as Game
+  const game = { eliminatedPlayers: [] as string[], roundCount: 0, ...gameSnap.data() } as unknown as Game
 
-  // 3. Sum every round's scores from scratch
+  // 3. Replay every round in order to produce fresh cumulative totals
   const newTotals: Record<string, number> = {}
   game.players.forEach(p => { newTotals[p.uid] = 0 })
 
-  allRoundsSnap.docs.forEach(d => {
-    const scores = d.id === roundId ? newScores : (d.data().scores ?? {}) as Record<string, number>
+  // Sort rounds by roundNumber to replay in correct order
+  const sortedRounds = allRoundsSnap.docs
+    .map(d => ({ id: d.id, ...(d.data() as { roundNumber: number; scores: Record<string, number> }) }))
+    .sort((a, b) => a.roundNumber - b.roundNumber)
+
+  sortedRounds.forEach(r => {
+    const scores = r.id === roundId ? newScores : (r.scores ?? {})
     Object.entries(scores).forEach(([uid, pts]) => {
       newTotals[uid] = (newTotals[uid] ?? 0) + pts
     })
   })
 
-  // 4. Recompute eliminations from new totals
+  // 4. Recompute eliminations and game status/winner
   const newEliminated = game.players
     .filter(p => (newTotals[p.uid] ?? 0) >= game.targetScore)
     .map(p => p.uid)
 
+  const activePlayers = game.players.filter(p => !newEliminated.includes(p.uid))
+
+  let status: Game['status'] = 'active'
+  let winner: string | null = null
+  let finishedAt: number | null = game.finishedAt
+
+  if (activePlayers.length <= 1 && game.players.length > 1) {
+    status = 'finished'
+    finishedAt = finishedAt ?? Date.now()
+    if (activePlayers.length === 1) {
+      winner = activePlayers[0].uid
+    } else {
+      winner = Object.entries(newTotals).reduce<string>((best, [uid, pts]) => {
+        return pts < (newTotals[best] ?? Infinity) ? uid : best
+      }, Object.keys(newTotals)[0])
+    }
+  }
+
   await updateDoc(gameRef, {
     totalScores: newTotals,
     eliminatedPlayers: newEliminated,
+    status,
+    winner,
+    finishedAt,
   })
 }
 

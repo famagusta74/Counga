@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getGame, getRounds, addRound, finishGameManually, updateRound, addPlayerToGame, updateTargetScore } from '../firebase/db'
+import { addRound, finishGameManually, updateRound, addPlayerToGame, updateTargetScore, subscribeToGame, subscribeToRounds } from '../firebase/db'
 import type { Game, Round } from '../types'
 import type { CardRank } from '../types'
 import ScoreTable from '../components/ScoreTable'
 import CardPicker from '../components/CardPicker'
 import { useAuth } from '../contexts/AuthContext'
-import { Trophy, Plus, Flag, UserCheck, Star, UserPlus, AlertTriangle, Target } from 'lucide-react'
+import { Trophy, Plus, Flag, UserCheck, Star, UserPlus, AlertTriangle, Target, Share2 } from 'lucide-react'
 
 type PickerState = {
   playerIndex: number   // index into activePlayers array
@@ -97,6 +97,7 @@ export default function GamePage() {
   const [newlyEliminated, setNewlyEliminated] = useState<string[]>([])
   const [upgradingGuest, setUpgradingGuest]   = useState(false)
   const [upgradeError, setUpgradeError]       = useState('')
+  const [shareCopied, setShareCopied]         = useState(false)
 
   // Round winner flow
   const [roundWinnerUid, setRoundWinnerUid]         = useState<string | null>(null)
@@ -118,15 +119,34 @@ export default function GamePage() {
   const [changingTarget, setChangingTarget]     = useState(false)
   const [changeTargetError, setChangeTargetError] = useState('')
 
-  const load = useCallback(async () => {
+  // ── Live Firestore listeners ──────────────────────────────────────────────────
+  // All players looking at the same game URL see updates in real time without
+  // refreshing — this is the primary mechanism for a "shared scorekeeper" UX.
+  useEffect(() => {
     if (!gameId) return
-    const [g, rs] = await Promise.all([getGame(gameId), getRounds(gameId)])
-    setGame(g)
-    setRounds(rs)
-    setLoading(false)
+    let gameReady   = false
+    let roundsReady = false
+
+    const unsubGame = subscribeToGame(gameId, (g) => {
+      setGame(g)
+      gameReady = true
+      if (gameReady && roundsReady) setLoading(false)
+    })
+
+    const unsubRounds = subscribeToRounds(gameId, (rs) => {
+      setRounds(rs)
+      roundsReady = true
+      if (gameReady && roundsReady) setLoading(false)
+    })
+
+    return () => { unsubGame(); unsubRounds() }
   }, [gameId])
 
-  useEffect(() => { load() }, [load])
+  // Kept for cases where we need a one-off re-fetch after a write
+  // (listeners will update state automatically, but some flows still call this)
+  const load = useCallback(async () => {
+    // no-op — listeners keep state current
+  }, [])
 
   // Active (non-eliminated) players only
   const activePlayers = (game?.players ?? []).filter(
@@ -238,20 +258,27 @@ export default function GamePage() {
     const prevEliminated = game.eliminatedPlayers ?? []
     try {
       await addRound(gameId, scores, rounds.length + 1, winnerUid)
-      const updated = await getGame(gameId)
-      const rs = await getRounds(gameId)
-      setGame(updated)
-      setRounds(rs)
-
-      if (!updated) return
-
-      const justEliminated = (updated.eliminatedPlayers ?? []).filter(
-        uid => !prevEliminated.includes(uid)
-      )
-      setNewlyEliminated(justEliminated)
+      // Listeners will update game + rounds state automatically.
+      // We need the updated game to decide post-round state; snapshot listener
+      // fires almost immediately, but we capture the pre-write state here.
       setLastRoundScores(scores)
+      // Compute newly eliminated from current known state + incoming scores
+      const newTotals = { ...game.totalScores }
+      Object.entries(scores).forEach(([uid, pts]) => {
+        newTotals[uid] = (newTotals[uid] ?? 0) + pts
+      })
+      const justEliminated = game.players
+        .filter(p =>
+          (newTotals[p.uid] ?? 0) >= game.targetScore &&
+          !prevEliminated.includes(p.uid)
+        )
+        .map(p => p.uid)
+      setNewlyEliminated(justEliminated)
 
-      if (updated.status === 'finished') {
+      const activesAfter = game.players.filter(p =>
+        ![...prevEliminated, ...justEliminated].includes(p.uid)
+      )
+      if (activesAfter.length <= 1) {
         setPostRound('idle')
       } else {
         setPostRound('asking')
@@ -288,7 +315,7 @@ export default function GamePage() {
     setChangeTargetError('')
     try {
       await updateTargetScore(gameId, val)
-      await load()
+      // listener updates game state automatically
       setShowChangeTarget(false)
       setNewTargetInput('')
     } catch {
@@ -317,7 +344,7 @@ export default function GamePage() {
         isGuest: true,
       }
       await addPlayerToGame(gameId, newPlayer, highestScore)
-      await load()
+      // listener updates game state automatically
       setShowAddPlayer(false)
       setNewPlayerName('')
     } catch (e) {
@@ -332,7 +359,7 @@ export default function GamePage() {
     setEndingGame(true)
     if (!gameId) return
     await finishGameManually(gameId)
-    await load()
+    // listener updates game state automatically
     setPostRound('idle')
     setEndingGame(false)
     setNewlyEliminated([])
@@ -341,14 +368,25 @@ export default function GamePage() {
   const handleEditRound = useCallback(async (round: Round, newScores: Record<string, number>) => {
     if (!gameId) return
     await updateRound(gameId, round.id, newScores)
-    await load()
-  }, [gameId, load])
+    // listener updates game + rounds automatically
+  }, [gameId])
 
   const handleFinish = async () => {
     if (!gameId) return
     await finishGameManually(gameId)
-    await load()
+    // listener updates game state automatically
     setShowFinishConfirm(false)
+  }
+
+  const handleShare = async () => {
+    const url = window.location.href
+    if (navigator.share) {
+      await navigator.share({ title: 'Counga game', url }).catch(() => {/* user cancelled */})
+    } else {
+      await navigator.clipboard.writeText(url).catch(() => {/* ignore */})
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    }
   }
 
   // ── Guest upgrade ─────────────────────────────────────────────────────────────
@@ -407,8 +445,19 @@ export default function GamePage() {
             {' · '}Round {rounds.length}
           </p>
         </div>
-        {game.status === 'active'   && <span className="badge badge-green">Active</span>}
-        {game.status === 'finished' && <span className="badge badge-amber">Finished</span>}
+        <div className="flex items-center gap-2">
+          {/* Share / copy link — lets any player open this game on their device */}
+          <button
+            onClick={handleShare}
+            className="btn-secondary text-xs px-3 py-2 gap-1.5"
+            title="Share game link"
+          >
+            <Share2 size={14} />
+            {shareCopied ? 'Copied!' : 'Share'}
+          </button>
+          {game.status === 'active'   && <span className="badge badge-green">Active</span>}
+          {game.status === 'finished' && <span className="badge badge-amber">Finished</span>}
+        </div>
       </div>
 
       {/* Guest upgrade banner */}
@@ -680,9 +729,19 @@ export default function GamePage() {
             {showAddPlayer ? (
               <div className="px-5 py-4 space-y-3">
                 <p className="text-sm font-semibold text-gray-800">Add a new player</p>
-                <p className="text-xs text-gray-500">
-                  They will start with <strong>{Math.max(0, ...Object.values(game.totalScores))} pts</strong> — the highest score in the game.
-                </p>
+                {(() => {
+                  const startPts = Math.max(0, ...Object.values(game.totalScores))
+                  const leader = [...game.players].sort((a, b) =>
+                    (game.totalScores[b.uid] ?? 0) - (game.totalScores[a.uid] ?? 0)
+                  )[0]
+                  return (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800">
+                      Starts at <strong>{startPts} pts</strong>
+                      {leader ? ` (same as ${leader.displayName}, the current leader)` : ''}
+                      {' '}— joining mid-game is fair play.
+                    </div>
+                  )
+                })()}
                 <input
                   type="text"
                   value={newPlayerName}
