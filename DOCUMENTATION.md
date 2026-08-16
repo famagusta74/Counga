@@ -1,6 +1,6 @@
 # Counga Score Keeper — Technical Documentation
 
-> Version 1.11.2 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
+> Version 1.11.3 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
 
 ---
 
@@ -645,6 +645,14 @@ Prerequisites: Node.js 18+. Firebase project must have:
 ---
 
 ## Changelog
+
+### v1.11.3 — Winner tap advances immediately
+
+**Improvement**
+
+- **"Won this round" now advances immediately with 0 pts** — previously tapping the winner button on a player's `CardPicker` screen only flagged the winner internally; the user still had to press a separate Confirm button to move to the next player. Now tapping "Won this round" immediately records 0 points for that player and opens the `CardPicker` for the next player (or submits the round if it was the last player). One tap = done.
+
+---
 
 ### v1.11.2 — Workflow Fix
 

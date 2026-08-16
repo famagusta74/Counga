@@ -207,12 +207,22 @@ export default function GamePage() {
     setSuggestedWinnerUid(null)
   }
 
-  // User taps "Won this round" on any CardPicker screen mid-round
+  // User taps "Won this round" on any CardPicker screen.
+  // Record this player as the round winner and immediately advance with score 0 —
+  // no extra "Confirm" tap needed.
   const handlePickerWinner = (playerUid: string) => {
     setRoundWinnerUid(playerUid)
-    // Continue collecting remaining players — this player's score will be 0 when round submits
-    // We don't close the round here; the caller proceeds to next player normally
-    // (GamePage will pass 0 for this player when submitRound is called at the end)
+    // Immediately confirm 0 for this player and advance to the next.
+    // We pass winnerUid explicitly because the setRoundWinnerUid state update
+    // won't be visible yet inside the same synchronous call.
+    if (!game || !pickerState) return
+    const newScores = { ...pickerState.scores, [playerUid]: 0 }
+    const nextIndex = pickerState.playerIndex + 1
+    if (nextIndex < activePlayers.length) {
+      setPickerState({ playerIndex: nextIndex, scores: newScores })
+    } else {
+      submitRound(newScores, playerUid)
+    }
   }
 
   const handlePickerCancel = () => {
