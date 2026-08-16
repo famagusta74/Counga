@@ -1,6 +1,6 @@
 # Counga Score Keeper — Technical Documentation
 
-> Version 1.11.1 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
+> Version 1.11.2 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
 
 ---
 
@@ -645,6 +645,15 @@ Prerequisites: Node.js 18+. Firebase project must have:
 ---
 
 ## Changelog
+
+### v1.11.2 — Workflow Fix
+
+**Infrastructure**
+
+- **Firestore deploy step no longer blocks GitHub Pages**: Added `continue-on-error: true` to the "Deploy Firestore rules + indexes" workflow step. A missing or misconfigured `FIREBASE_SERVICE_ACCOUNT` secret previously caused the entire workflow — including the Pages deploy — to fail. Now the step reports its result but the job continues regardless.
+- **Improved credential cleanup**: The service account key file is now removed with `rm -f` (no error if already absent) and the `firebase-tools` exit code is properly propagated so the step result is still reported accurately in the Actions UI.
+
+---
 
 ### v1.11.1 — Build Fix
 
