@@ -219,35 +219,51 @@ export function subscribeToRounds(
 
 /**
  * Returns recent games that the current user participated in (as creator or player).
- * Queries by createdBy for simplicity; also fetches games where the uid appears in
- * totalScores (participant-indexed), then merges and deduplicates.
+ *
+ * Two queries are run in parallel:
+ *  1. games where createdBy == uid  — covers all games the user created, including
+ *     old ones that pre-date the playerUids field.
+ *  2. games where playerUids array-contains uid  — covers games created by others
+ *     where this user was added as a player (requires the playerUids field + index).
+ *
+ * The playerUids query is run with Promise.allSettled so that a missing Firestore
+ * index or absent field on old documents never silently wipes the history list.
  */
 export async function getRecentGames(count = 20): Promise<Game[]> {
   const uid = auth.currentUser?.uid
   if (!uid) return []
 
-  // Fetch games created by the user
-  const [byCreator, byPlayer] = await Promise.all([
-    getDocs(query(
-      collection(db, 'games'),
-      where('createdBy', '==', uid),
-      orderBy('createdAt', 'desc'),
-      limit(count),
-    )),
-    // Firestore supports array-contains on a flat string field.
-    // We store playerUids as a flat array on the game document (added in createGame).
-    getDocs(query(
-      collection(db, 'games'),
-      where('playerUids', 'array-contains', uid),
-      orderBy('createdAt', 'desc'),
-      limit(count),
-    )),
+  const byCreatorPromise = getDocs(query(
+    collection(db, 'games'),
+    where('createdBy', '==', uid),
+    orderBy('createdAt', 'desc'),
+    limit(count),
+  ))
+
+  // playerUids query — only works once the index is deployed and field is present.
+  // Use allSettled so a failure here never blocks the createdBy results.
+  const byPlayerPromise = getDocs(query(
+    collection(db, 'games'),
+    where('playerUids', 'array-contains', uid),
+    orderBy('createdAt', 'desc'),
+    limit(count),
+  ))
+
+  const [byCreatorResult, byPlayerResult] = await Promise.allSettled([
+    byCreatorPromise,
+    byPlayerPromise,
   ])
 
   const seen = new Set<string>()
   const games: Game[] = []
-  for (const snap of [byCreator, byPlayer]) {
-    for (const d of snap.docs) {
+
+  const snapshots = [
+    byCreatorResult.status === 'fulfilled' ? byCreatorResult.value.docs : [],
+    byPlayerResult.status  === 'fulfilled' ? byPlayerResult.value.docs  : [],
+  ]
+
+  for (const docs of snapshots) {
+    for (const d of docs) {
       if (seen.has(d.id)) continue
       seen.add(d.id)
       games.push({
@@ -258,6 +274,7 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
       } as unknown as Game)
     }
   }
+
   games.sort((a, b) => b.createdAt - a.createdAt)
   return games.slice(0, count)
 }

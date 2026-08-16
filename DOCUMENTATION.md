@@ -1,6 +1,6 @@
 # Counga Score Keeper — Technical Documentation
 
-> Version 1.11.3 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
+> Version 1.11.4 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
 
 ---
 
@@ -645,6 +645,15 @@ Prerequisites: Node.js 18+. Firebase project must have:
 ---
 
 ## Changelog
+
+### v1.11.4 — History restored for existing games
+
+**Bug fix**
+
+- **Game history was blank after v1.11.0** — the new `getRecentGames` used `Promise.all` for two Firestore queries. If the `playerUids` index had not yet been deployed to Firestore (or old game documents didn't have the `playerUids` field), the second query threw an error that caused the entire `Promise.all` to reject, returning an empty list and making history appear empty.
+- **Fix**: switched to `Promise.allSettled` so the `playerUids` query failure is silently ignored and the `createdBy` query results (which cover all games created by the user, including old ones) are always returned. History now works correctly for all games — old and new.
+
+---
 
 ### v1.11.3 — Winner tap advances immediately
 
