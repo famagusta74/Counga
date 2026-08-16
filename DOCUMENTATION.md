@@ -1,6 +1,6 @@
 # Counga Score Keeper — Technical Documentation
 
-> Version 1.11.0 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
+> Version 1.11.1 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
 
 ---
 
@@ -645,6 +645,14 @@ Prerequisites: Node.js 18+. Firebase project must have:
 ---
 
 ## Changelog
+
+### v1.11.1 — Build Fix
+
+**Bug fixes**
+
+- **`noUnusedLocals` TypeScript error**: The no-op `load` callback left in `GamePage` after switching to `onSnapshot` listeners triggered a hard TypeScript error (`noUnusedLocals: true` in tsconfig). Removed the dead function and its `useCallback` import. `handleEditRound` was also simplified from `useCallback` to a plain `async` function since it no longer needs memoisation without `load` as a dependency.
+
+---
 
 ### v1.11.0 — Shared Scorekeeper & Quality Fixes
 

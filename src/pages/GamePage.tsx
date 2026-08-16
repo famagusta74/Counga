@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { addRound, finishGameManually, updateRound, addPlayerToGame, updateTargetScore, subscribeToGame, subscribeToRounds } from '../firebase/db'
 import type { Game, Round } from '../types'
@@ -141,12 +141,6 @@ export default function GamePage() {
 
     return () => { unsubGame(); unsubRounds() }
   }, [gameId])
-
-  // Kept for cases where we need a one-off re-fetch after a write
-  // (listeners will update state automatically, but some flows still call this)
-  const load = useCallback(async () => {
-    // no-op — listeners keep state current
-  }, [])
 
   // Active (non-eliminated) players only
   const activePlayers = (game?.players ?? []).filter(
@@ -365,11 +359,11 @@ export default function GamePage() {
     setNewlyEliminated([])
   }
 
-  const handleEditRound = useCallback(async (round: Round, newScores: Record<string, number>) => {
+  const handleEditRound = async (round: Round, newScores: Record<string, number>) => {
     if (!gameId) return
     await updateRound(gameId, round.id, newScores)
     // listener updates game + rounds automatically
-  }, [gameId])
+  }
 
   const handleFinish = async () => {
     if (!gameId) return
