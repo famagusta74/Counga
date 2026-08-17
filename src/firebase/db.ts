@@ -233,11 +233,13 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
   const uid = auth.currentUser?.uid
   if (!uid) return []
 
+  // No orderBy on these queries — orderBy('createdAt') combined with a where()
+  // requires a composite Firestore index that may not be deployed yet.
+  // We sort client-side after merging instead, which always works.
   const byCreatorPromise = getDocs(query(
     collection(db, 'games'),
     where('createdBy', '==', uid),
-    orderBy('createdAt', 'desc'),
-    limit(count),
+    limit(200),
   ))
 
   // playerUids query — only works once the index is deployed and field is present.
@@ -245,8 +247,7 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
   const byPlayerPromise = getDocs(query(
     collection(db, 'games'),
     where('playerUids', 'array-contains', uid),
-    orderBy('createdAt', 'desc'),
-    limit(count),
+    limit(200),
   ))
 
   const [byCreatorResult, byPlayerResult] = await Promise.allSettled([
@@ -281,18 +282,23 @@ export async function getRecentGames(count = 20): Promise<Game[]> {
 
 /** Returns the active game created by the current user, if any */
 export async function getActiveGameForUser(uid: string): Promise<Game | null> {
+  // No orderBy — the createdBy+status+createdAt composite index may not be deployed.
+  // We just need any active game; there should be at most one.
   const snap = await getDocs(
     query(
       collection(db, 'games'),
       where('createdBy', '==', uid),
       where('status', '==', 'active'),
-      orderBy('createdAt', 'desc'),
-      limit(1),
+      limit(5),
     )
   )
   if (snap.empty) return null
-  const d = snap.docs[0]
-  return { eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game
+  // Pick the most recently created one client-side
+  const docs = snap.docs.map(d => ({
+    eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id,
+  } as unknown as Game))
+  docs.sort((a, b) => b.createdAt - a.createdAt)
+  return docs[0]
 }
 
 /** Update the target score for an active game */
@@ -622,11 +628,11 @@ export interface PlayerStats {
  * filter client-side. Capped at 500 for performance.
  */
 export async function getPlayerStats(uid: string): Promise<PlayerStats> {
+  // No orderBy — avoid composite index dependency. Filter + sort client-side.
   const snap = await getDocs(
     query(
       collection(db, 'games'),
       where('status', '==', 'finished'),
-      orderBy('createdAt', 'desc'),
       limit(500),
     )
   )
@@ -673,18 +679,17 @@ export async function getPlayerStats(uid: string): Promise<PlayerStats> {
 
 /** Fetch finished games that include `uid` as a player (own history). */
 export async function getGamesForPlayer(uid: string, count = 50): Promise<Game[]> {
-  // Firestore can't query array-contains on a nested field (players[].uid),
-  // so we fetch recent finished games and filter client-side.
+  // No orderBy — avoid composite index dependency. Filter + sort client-side.
   const snap = await getDocs(
     query(
       collection(db, 'games'),
       where('status', '==', 'finished'),
-      orderBy('createdAt', 'desc'),
       limit(200),
     )
   )
   return snap.docs
     .map(d => ({ eliminatedPlayers: [] as string[], roundCount: 0, ...d.data(), id: d.id } as unknown as Game))
     .filter(g => g.players.some(p => p.uid === uid))
+    .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, count)
 }

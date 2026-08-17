@@ -1,6 +1,6 @@
 # Counga Score Keeper — Technical Documentation
 
-> Version 1.11.4 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
+> Version 1.11.5 · React 18 · TypeScript · Firebase · Vite · Tailwind CSS · PWA
 
 ---
 
@@ -645,6 +645,15 @@ Prerequisites: Node.js 18+. Firebase project must have:
 ---
 
 ## Changelog
+
+### v1.11.5 — Remove composite index dependency from all queries
+
+**Bug fix**
+
+- **Root cause of blank history identified and fixed**: Every Firestore query that combined a `where()` filter with `orderBy('createdAt')` requires a composite index deployed to the Firebase project. The `FIREBASE_SERVICE_ACCOUNT` secret was never configured in GitHub Actions, so the Firestore deploy step was silently skipped — **none of the composite indexes were ever deployed**. This caused all of those queries to throw a Firestore "requires an index" error and return empty results.
+- **Fix applied to all affected queries**: Removed `orderBy` from `getRecentGames`, `getActiveGameForUser`, `getPlayerStats`, and `getGamesForPlayer`. All sorting is now done client-side after the results are fetched, which works without any Firestore indexes. The data is always sorted by `createdAt` descending before being returned.
+
+---
 
 ### v1.11.4 — History restored for existing games
 
